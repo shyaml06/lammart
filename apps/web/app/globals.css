@@ -1,0 +1,99 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 20, 32, 27;
+  /* #14201B */
+  --background-rgb: 250, 248, 244;
+  /* #FAF8F4 */
+}
+
+body {
+  color: #14201B;
+  background-color: #FAF8F4;
+  font-family: 'Inter', sans-serif;
+  margin: 0;
+}
+
+.h,
+h1,
+h2,
+h3,
+h4,
+.font-display {
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+/* Button & Card Micro-interactions from official reference */
+.btn-b1 {
+  background: #ffffff;
+  color: #0B7A55;
+  border: 1.5px solid #0B7A55;
+  border-radius: 10px;
+  min-height: 44px;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.btn-b1:hover {
+  background: #EAF5EF;
+}
+
+.btn-b2 {
+  background: #0B7A55;
+  color: #ffffff;
+  border: 1.5px solid #0B7A55;
+  border-radius: 10px;
+  min-height: 44px;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.btn-b2:hover {
+  background: #086143;
+}
+
+.chip {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid #D9D3C7;
+  background: #ffffff;
+  border-radius: 10px;
+  font-size: 14px;
+  color: #14201B;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.chip:hover {
+  border-color: #0B7A55;
+}
+
+.chip-active {
+  background: #EAF5EF;
+  border-color: #0B7A55;
+  color: #0B7A55;
+  font-weight: 600;
+}
+
+.swatch-card {
+  background: #ffffff;
+  border: 1px solid #E7E2D9;
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.swatch-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px rgba(20, 32, 27, 0.10);
+}

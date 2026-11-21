@@ -1,0 +1,46 @@
+{
+  "name": "@lammart/api",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest run",
+    "migrate": "tsx src/db/migrate.ts",
+    "seed": "tsx src/db/seed.ts"
+  },
+  "dependencies": {
+    "@lammart/shared": "*",
+    "express": "^4.21.1",
+    "better-sqlite3": "^11.5.0",
+    "cors": "^2.8.5",
+    "cookie-parser": "^1.4.7",
+    "jsonwebtoken": "^9.0.2",
+    "bcrypt": "^5.1.1",
+    "helmet": "^8.0.0",
+    "express-rate-limit": "^7.4.1",
+    "pdfkit": "^0.15.0",
+    "pino": "^9.5.0",
+    "pino-http": "^10.3.0",
+    "dotenv": "^16.4.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/cors": "^2.8.17",
+    "@types/cookie-parser": "^1.4.7",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/bcrypt": "^5.0.2",
+    "@types/pdfkit": "^0.13.5",
+    "@types/node": "^22.8.0",
+    "@types/supertest": "^6.0.2",
+    "supertest": "^7.0.0",
+    "vitest": "^2.1.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "rimraf": "^6.0.1"
+  }
+}
