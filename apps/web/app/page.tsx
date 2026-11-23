@@ -524,6 +524,7 @@ export default function CounterBillingPage() {
               <div className="flex rounded-lg overflow-hidden border border-gray-300">
                 <button
                   type="button"
+                  aria-pressed={dispatchFrom === 'Godown'}
                   onClick={() => setDispatchFrom('Godown')}
                   className={`px-3 py-1.5 text-xs font-semibold ${
                     dispatchFrom === 'Godown' ? 'bg-brand-dark text-white' : 'bg-white text-gray-700'
@@ -533,6 +534,7 @@ export default function CounterBillingPage() {
                 </button>
                 <button
                   type="button"
+                  aria-pressed={dispatchFrom === 'Showroom'}
                   onClick={() => setDispatchFrom('Showroom')}
                   className={`px-3 py-1.5 text-xs font-semibold ${
                     dispatchFrom === 'Showroom' ? 'bg-brand-dark text-white' : 'bg-white text-gray-700'
