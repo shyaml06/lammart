@@ -23,7 +23,7 @@ import {
   ShieldAlert,
   X
 } from 'lucide-react';
-import { apiRequest } from '@/lib/api';
+import { apiRequest, getAuthToken, ensureToken } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { formatINR } from '@/lib/formatters';
 
@@ -190,22 +190,36 @@ export default function ItemsMasterPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Reset input value so selecting the same file again triggers onChange
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+
+    // Ensure valid auth token
+    let token = getAuthToken();
+    if (!token) {
+      token = await ensureToken();
+    }
+
     const formData = new FormData();
     formData.append('image', file);
 
     setIsUploading(true);
     try {
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const res = await fetch('/api/v1/upload', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('lammart_token')}`,
-        },
+        headers,
         body: formData,
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
       if (!res.ok) {
-        throw new Error(data?.error || 'Upload failed');
+        throw new Error(data?.error || `Upload failed with status ${res.status}`);
       }
 
       const uploadedUrl = data?.url || data?.file?.url;
@@ -214,8 +228,9 @@ export default function ItemsMasterPage() {
       }
 
       setFormImageUrl(uploadedUrl);
-      showNotification('Image uploaded successfully!');
+      showNotification('Image uploaded successfully from your computer!');
     } catch (err: any) {
+      console.error('Image upload error:', err);
       showNotification(err.message || 'Image upload failed', 'error');
     } finally {
       setIsUploading(false);
@@ -692,15 +707,22 @@ export default function ItemsMasterPage() {
                 </label>
                 <div className="flex flex-wrap items-center gap-4">
                   {/* Thumbnail preview */}
-                  <div className="w-20 h-20 rounded-xl bg-surface border border-border flex items-center justify-center overflow-hidden shrink-0">
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-20 h-20 rounded-xl bg-surface border border-border hover:border-accent/60 flex items-center justify-center overflow-hidden shrink-0 cursor-pointer group transition"
+                    title="Click to select image file"
+                  >
                     {formImageUrl ? (
                       <img
                         src={formImageUrl}
                         alt="Preview"
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-cover group-hover:scale-105 transition"
                       />
                     ) : (
-                      <ImageIcon className="w-8 h-8 text-text-faint" />
+                      <div className="text-center">
+                        <ImageIcon className="w-8 h-8 text-text-faint group-hover:text-accent mx-auto transition" />
+                        <span className="text-[9px] text-text-faint block mt-0.5">Click file</span>
+                      </div>
                     )}
                   </div>
 

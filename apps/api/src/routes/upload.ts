@@ -30,25 +30,30 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15 MB
   fileFilter: (_req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-    if (allowed.includes(file.mimetype)) {
+    const isImage = file.mimetype.startsWith('image/') || /\.(jpe?g|png|webp|gif|avif|bmp|jfif)$/i.test(file.originalname);
+    if (isImage) {
       cb(null, true);
     } else {
-      cb(new Error('Only JPEG, PNG, WebP, and GIF images are allowed'));
+      cb(new Error('Please upload an image file (JPEG, PNG, WebP, GIF, AVIF, or BMP)'));
     }
   },
 });
 
 // POST /api/v1/upload — requires admin auth
-router.post('/', requireAuth, upload.single('image'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No image file provided' });
-  }
-  res.json({
-    url: `/uploads/${req.file.filename}`,
-    file: { filename: req.file.filename, url: `/uploads/${req.file.filename}` },
+router.post('/', requireAuth, (req, res) => {
+  upload.single('image')(req, res, (err: any) => {
+    if (err) {
+      return res.status(400).json({ error: err.message || 'Failed to upload image' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: 'No image file provided' });
+    }
+    res.json({
+      url: `/uploads/${req.file.filename}`,
+      file: { filename: req.file.filename, url: `/uploads/${req.file.filename}` },
+    });
   });
 });
 
