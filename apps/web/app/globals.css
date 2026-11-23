@@ -12,6 +12,16 @@
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-space-grotesk), sans-serif;
   }
+
+  /* Hide number-input spinners */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
 }
 
 /* Print styling for Bills, Challans & Invoices */
@@ -26,4 +36,40 @@
   .print-only {
     display: block !important;
   }
+}
+
+@layer components {
+  .icon-action {
+    @apply inline-grid min-h-11 min-w-11 place-items-center rounded-lg;
+  }
+  .table-scroll {
+    @apply max-h-[60vh] overflow-auto;
+    scrollbar-gutter: stable;
+  }
+  .table-scroll th {
+    @apply sticky top-0 z-10 bg-gray-50;
+  }
+  .skip-link {
+    @apply sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-2 focus:z-50 focus:rounded-lg focus:bg-white focus:p-3;
+  }
+}
+
+:where(button, input, select, textarea, a, [tabindex]):focus-visible {
+  outline: 2px solid #0B7A55 !important;
+  outline-offset: 2px;
+}
+.print-copy { display: none; }
+.thermal-document { max-width: 72mm; }
+
+@media print {
+  body:has(> .print-copy) { display: block !important; min-height: 0; }
+  body:has(> .print-copy) > :not(.print-copy) { display: none !important; }
+  body > .print-copy { display: block !important; }
+  .print-document { color: #000; padding: 0; }
+  .print-document * { color: inherit !important; background: transparent !important; box-shadow: none !important; }
+  .print-document thead { display: table-header-group; }
+  .print-document tr, .print-keep { break-inside: avoid; }
+  .print-table th, .print-table td { padding: 4px; overflow-wrap: anywhere; }
+  .print-table { table-layout: fixed; font-size: 9pt; }
+  .print-table th:nth-child(2) { width: 27%; }
 }

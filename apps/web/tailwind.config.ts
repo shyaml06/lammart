@@ -17,21 +17,9 @@ const config: Config = {
           hover: '#086143',
           tint: '#EAF5EF',
         },
-        dark: {
-          DEFAULT: '#0F1A15',
-          text: '#E6EFEA',
-        },
-        page: '#FAF8F4',
-        content: {
-          primary: '#14201B',
-          muted: '#5B6660',
-        },
-        card: '#FFFFFF',
-        border: {
-          DEFAULT: '#E7E2D9',
-          chip: '#D9D3C7',
-        },
         brand: {
+          DEFAULT: '#0B7A55',
+          dark: '#086143',
           50: '#EAF5EF',
           100: '#ccebe0',
           200: '#99d7c1',
@@ -44,6 +32,20 @@ const config: Config = {
           900: '#0F1A15',
           950: '#14201B',
         },
+        'brand-dark': '#086143',
+        surface: '#FAF8F4',
+        page: '#FAF8F4',
+        content: {
+          primary: '#14201B',
+          muted: '#5B6660',
+        },
+        card: '#FFFFFF',
+        border: {
+          DEFAULT: '#E7E2D9',
+          chip: '#D9D3C7',
+          input: '#D9D3C7',
+        },
+        'input-border': '#D9D3C7',
       },
       maxWidth: {
         store: '1360px',

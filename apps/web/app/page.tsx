@@ -474,7 +474,7 @@ export default function CounterBillingPage() {
       }}
     >
       {/* Top Banner: Mode & Settings Switcher */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#E7E2D9] flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-white rounded-2xl p-4 shadow-sm border border-border flex flex-col md:flex-row md:items-center justify-between gap-4">
         {/* Document Mode Switcher */}
         <div className="flex flex-wrap sm:flex-nowrap items-center gap-1 bg-gray-100 p-1 rounded-xl w-full md:w-auto">
           <button
@@ -483,7 +483,7 @@ export default function CounterBillingPage() {
             onClick={() => setDocType('Delivery_Challan')}
             className={`flex-1 sm:flex-none text-center px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition ${
               docType === 'Delivery_Challan'
-                ? 'bg-[#0B7A55] text-white shadow'
+                ? 'bg-brand text-white shadow'
                 : 'text-gray-600 hover:text-gray-900'
             }`}
           >
@@ -495,7 +495,7 @@ export default function CounterBillingPage() {
             onClick={() => setDocType('Tax_Invoice')}
             className={`flex-1 sm:flex-none text-center px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition ${
               docType === 'Tax_Invoice'
-                ? 'bg-[#0B7A55] text-white shadow'
+                ? 'bg-brand text-white shadow'
                 : 'text-gray-600 hover:text-gray-900'
             }`}
           >
@@ -507,7 +507,7 @@ export default function CounterBillingPage() {
             onClick={() => setDocType('Estimate')}
             className={`flex-1 sm:flex-none text-center px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition ${
               docType === 'Estimate'
-                ? 'bg-[#0B7A55] text-white shadow'
+                ? 'bg-brand text-white shadow'
                 : 'text-gray-600 hover:text-gray-900'
             }`}
           >
@@ -526,7 +526,7 @@ export default function CounterBillingPage() {
                   type="button"
                   onClick={() => setDispatchFrom('Godown')}
                   className={`px-3 py-1.5 text-xs font-semibold ${
-                    dispatchFrom === 'Godown' ? 'bg-emerald-800 text-white' : 'bg-white text-gray-700'
+                    dispatchFrom === 'Godown' ? 'bg-brand-dark text-white' : 'bg-white text-gray-700'
                   }`}
                 >
                   Main Godown
@@ -535,7 +535,7 @@ export default function CounterBillingPage() {
                   type="button"
                   onClick={() => setDispatchFrom('Showroom')}
                   className={`px-3 py-1.5 text-xs font-semibold ${
-                    dispatchFrom === 'Showroom' ? 'bg-emerald-800 text-white' : 'bg-white text-gray-700'
+                    dispatchFrom === 'Showroom' ? 'bg-brand-dark text-white' : 'bg-white text-gray-700'
                   }`}
                 >
                   Showroom Display
@@ -553,7 +553,7 @@ export default function CounterBillingPage() {
                 placeholder="Vehicle / Tempo No. (e.g. GJ01AB1234)"
                 value={transportDetails}
                 onChange={(e) => setTransportDetails(e.target.value)}
-                className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs w-full sm:w-56 focus:outline-none focus:border-emerald-600"
+                className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs w-full sm:w-56 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
               />
             </div>
           )}
@@ -565,17 +565,17 @@ export default function CounterBillingPage() {
         {/* Left Column (2 Cols): Quick Autocomplete & Cart Table */}
         <div className="min-w-0 lg:col-span-2 space-y-6">
           {/* Quick Search & Fast Entry Bar */}
-          <div ref={searchContainerRef} className="bg-white rounded-2xl p-5 shadow-sm border border-[#E7E2D9] space-y-4">
+          <div ref={searchContainerRef} className="bg-white rounded-2xl p-5 shadow-sm border border-border space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-base font-bold text-gray-900 font-['Space_Grotesk'] flex items-center gap-2">
-                <Search className="w-4 h-4 text-[#0B7A55]" />
+              <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                <Search className="w-4 h-4 text-brand" />
                 <span>Instant Shade & SKU Search</span>
-                <span className="text-[11px] font-normal bg-gray-100 text-gray-600 border border-gray-200 px-1.5 py-0.5 rounded font-mono">
+                <span className="text-[11px] font-normal bg-gray-100 text-gray-600 border border-gray-200 px-1.5 py-0.5 rounded tabular-nums">
                   F2
                 </span>
               </h2>
               <span className="text-xs text-gray-500">
-                Type shade code, brand or finish (e.g. <span className="font-mono text-emerald-700 font-semibold">"21094 suede"</span>)
+                Type shade code, brand or finish (e.g. <span className="tabular-nums text-brand font-semibold">"21094 suede"</span>)
               </span>
             </div>
 
@@ -624,7 +624,7 @@ export default function CounterBillingPage() {
                   setIsSearching(Boolean(e.target.value.trim()));
                   setSearchQuery(e.target.value);
                 }}
-                className="w-full bg-[#FAF8F4] border border-[#D9D3C7] rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#0B7A55] focus:bg-white text-gray-900 shadow-inner"
+                className="w-full bg-surface border border-input-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-brand focus:bg-white text-gray-900 shadow-inner"
               />
 
               <p id="pos-shortcuts" className="mt-2 text-xs text-gray-500">
@@ -637,7 +637,7 @@ export default function CounterBillingPage() {
               
               {isSearching && (
                 <div role="status" className="mt-2 p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-600 flex items-center gap-2 animate-pulse">
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-700" />
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-brand" />
                   <span>Searching catalog variants...</span>
                 </div>
               )}
@@ -678,7 +678,7 @@ export default function CounterBillingPage() {
                           <div className="font-bold text-gray-900">
                             {v.brand} - {v.designCode} ({v.designName})
                           </div>
-                          <div className="text-xs text-gray-500">
+                          <div className="text-[13px] text-gray-700 font-medium">
                             {v.finish} | {v.thicknessMm}mm | {v.size} | {v.category}
                           </div>
                         </div>
@@ -704,7 +704,7 @@ export default function CounterBillingPage() {
                               Showroom: <span className="font-bold">{showroomStock}</span>
                             </div>
                           </div>
-                          <div className="font-mono font-bold text-emerald-700 text-base">
+                          <div className="tabular-nums font-bold text-brand text-base">
                             {formatINR(v.defaultSellingPrice)}
                           </div>
                         </div>
@@ -722,7 +722,7 @@ export default function CounterBillingPage() {
                   <div className="font-bold text-emerald-950 text-base">
                     {selectedVariant.brand} {selectedVariant.designCode} — {selectedVariant.designName}
                   </div>
-                  <div className="text-xs text-emerald-700 font-medium">
+                  <div className="text-xs text-brand font-medium">
                     {selectedVariant.finish} • {selectedVariant.thicknessMm}mm • {selectedVariant.size}
                   </div>
                 </div>
@@ -767,7 +767,7 @@ export default function CounterBillingPage() {
                       onBlur={() => {
                         if (!itemQty || parseFloat(itemQty) <= 0) setItemQty('1');
                       }}
-                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm font-bold text-gray-900 focus:outline-none focus:border-emerald-600"
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm font-bold text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
                     />
                   </div>
 
@@ -783,7 +783,7 @@ export default function CounterBillingPage() {
                       step="0.01"
                       value={itemRate}
                       onChange={(e) => setItemRate(Math.max(0, parseFloat(e.target.value) || 0))}
-                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono font-bold text-gray-900 focus:outline-none focus:border-emerald-600"
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm tabular-nums font-bold text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
                     />
                   </div>
 
@@ -798,14 +798,14 @@ export default function CounterBillingPage() {
                       id="pos-discount"
                       value={itemDiscount}
                       onChange={(e) => setItemDiscount(Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
-                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-emerald-600"
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm tabular-nums text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
                     />
                   </div>
 
                   <div className="flex items-end">
                     <button
                       type="submit"
-                      className="w-full bg-[#0B7A55] hover:bg-[#086143] text-white font-semibold py-2 px-4 rounded-lg text-sm shadow transition flex items-center justify-center gap-1.5"
+                      className="w-full bg-brand hover:bg-brand-dark text-white font-semibold py-2 px-4 rounded-lg text-sm shadow transition flex items-center justify-center gap-1.5"
                     >
                       <Plus className="w-4 h-4" />
                       <span>Add to Bill</span>
@@ -817,9 +817,9 @@ export default function CounterBillingPage() {
           </div>
 
           {/* Line Items Table with Inline Editing */}
-          <div className="bg-white rounded-2xl shadow-sm border border-[#E7E2D9] overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-sm border border-border overflow-hidden">
             <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-gray-50/50">
-              <h3 className="font-bold text-gray-900 text-sm font-['Space_Grotesk']">
+              <h3 className="font-bold text-gray-900 text-sm">
                 Billed Items ({cartItems.length})
               </h3>
               <span className="text-xs text-gray-500">Edit Quantity, Rate or Disc inline</span>
@@ -829,7 +829,7 @@ export default function CounterBillingPage() {
               <div className="p-12 text-center text-gray-400">
                 <Package className="w-12 h-12 mx-auto stroke-[1.2] mb-3 text-gray-300" />
                 <p className="font-medium text-sm">No items in the bill yet.</p>
-                <p className="text-xs text-gray-400 mt-1">Press <kbd className="bg-gray-100 text-gray-700 px-1 py-0.5 rounded text-[11px] font-mono">F2</kbd> to search and add laminates or hardware.</p>
+                <p className="text-xs text-gray-400 mt-1">Press <kbd className="bg-gray-100 text-gray-700 px-1 py-0.5 rounded text-[11px] tabular-nums">F2</kbd> to search and add laminates or hardware.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -857,9 +857,9 @@ export default function CounterBillingPage() {
                           <td className="py-3 px-4 text-gray-400">{idx + 1}</td>
                           <td className="py-3 px-4 font-bold text-gray-900">
                             {item.variant.brand} {item.variant.designCode}
-                            <div className="text-xs text-gray-500 font-normal">{item.variant.designName}</div>
+                            <div className="text-xs text-gray-600 font-normal">{item.variant.designName}</div>
                           </td>
-                          <td className="py-3 px-4 text-gray-600 text-xs">
+                          <td className="py-3 px-4 text-gray-700 text-[13px] font-medium">
                             {item.variant.finish} | {item.variant.thicknessMm}mm
                           </td>
                           <td className="py-2 px-3 text-center">
@@ -875,7 +875,7 @@ export default function CounterBillingPage() {
                                   if (val <= 0) handleUpdateCartItem(item.id, 'quantity', 1);
                                 }}
                                 aria-label={`Quantity for line ${idx + 1}: ${item.variant.designCode}`}
-                                className="w-16 bg-white border border-gray-300 rounded px-1.5 py-1 text-center text-sm font-bold text-gray-900 focus:outline-none focus:border-emerald-600 shadow-sm"
+                                className="w-16 bg-white border border-gray-300 rounded px-1.5 py-1 text-center text-sm font-bold text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand shadow-sm"
                               />
                               <span className="text-xs text-gray-500">{item.variant.unit}</span>
                             </div>
@@ -890,7 +890,7 @@ export default function CounterBillingPage() {
                                 handleUpdateCartItem(item.id, 'rate', Math.max(0, parseFloat(e.target.value) || 0))
                               }
                               aria-label={`Rate for line ${idx + 1}: ${item.variant.designCode}`}
-                              className="w-24 bg-white border border-gray-300 rounded px-1.5 py-1 text-right text-sm font-mono font-bold text-gray-900 focus:outline-none focus:border-emerald-600 shadow-sm"
+                              className="w-24 bg-white border border-gray-300 rounded px-1.5 py-1 text-right text-sm tabular-nums font-bold text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand shadow-sm"
                             />
                           </td>
                           <td className="py-2 px-3 text-right">
@@ -908,10 +908,10 @@ export default function CounterBillingPage() {
                                 )
                               }
                               aria-label={`Discount for line ${idx + 1}: ${item.variant.designCode}`}
-                              className="w-16 bg-white border border-gray-300 rounded px-1.5 py-1 text-right text-sm font-mono text-gray-700 focus:outline-none focus:border-emerald-600 shadow-sm"
+                              className="w-16 bg-white border border-gray-300 rounded px-1.5 py-1 text-right text-sm tabular-nums text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand shadow-sm"
                             />
                           </td>
-                          <td className="py-3 px-4 text-right font-mono font-bold text-gray-900">
+                          <td className="py-3 px-4 text-right tabular-nums font-bold text-gray-900">
                             {formatINR(lineNet)}
                           </td>
                           <td className="py-3 px-4 text-center">
@@ -938,16 +938,16 @@ export default function CounterBillingPage() {
         {/* Right Column: Customer Combobox, Commission & Summary */}
         <div className="space-y-6 lg:sticky lg:top-6">
           {/* Party & Referrer Card */}
-          <div className="bg-white rounded-2xl p-5 shadow-sm border border-[#E7E2D9] space-y-4">
-            <h3 className="font-bold text-gray-900 text-base font-['Space_Grotesk'] flex items-center justify-between">
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-border space-y-4">
+            <h3 className="font-bold text-gray-900 text-base flex items-center justify-between">
               <span className="flex items-center gap-2">
-                <UserCheck className="w-4 h-4 text-[#0B7A55]" />
+                <UserCheck className="w-4 h-4 text-brand" />
                 <span>Customer &amp; Referrer</span>
               </span>
               <button
                 type="button"
                 onClick={() => setIsAddCustomerModalOpen(true)}
-                className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold flex items-center gap-1 bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-200 transition"
+                className="text-xs text-brand hover:text-brand-dark font-semibold flex items-center gap-1 bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-200 transition"
               >
                 <UserPlus className="w-3.5 h-3.5" />
                 <span>+ Add Customer</span>
@@ -961,7 +961,7 @@ export default function CounterBillingPage() {
               </label>
 
               {selectedCustomer ? (
-                <div className="bg-[#FAF8F4] border border-[#0B7A55] rounded-xl p-3 flex items-center justify-between">
+                <div className="bg-surface border border-brand rounded-xl p-3 flex items-center justify-between">
                   <div>
                     <div className="font-bold text-gray-900 text-sm flex items-center gap-1.5">
                       <Check className="w-4 h-4 text-emerald-600" />
@@ -999,7 +999,7 @@ export default function CounterBillingPage() {
                       setCustomerSearch(e.target.value);
                       setIsCustomerDropdownOpen(true);
                     }}
-                    className="w-full bg-[#FAF8F4] border border-[#D9D3C7] rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-emerald-600 font-medium"
+                    className="w-full bg-surface border border-input-border rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand font-medium"
                   />
                   {customerSearch && (
                     <button
@@ -1029,7 +1029,7 @@ export default function CounterBillingPage() {
                         setIsAddCustomerModalOpen(true);
                         setIsCustomerDropdownOpen(false);
                       }}
-                      className="text-emerald-700 font-bold hover:underline"
+                      className="text-brand font-bold hover:underline"
                     >
                       + Create New
                     </button>
@@ -1044,7 +1044,7 @@ export default function CounterBillingPage() {
                           setIsAddCustomerModalOpen(true);
                           setIsCustomerDropdownOpen(false);
                         }}
-                        className="block mx-auto mt-2 text-emerald-700 font-semibold"
+                        className="block mx-auto mt-2 text-brand font-semibold"
                       >
                         + Add "{customerSearch}" as customer
                       </button>
@@ -1069,7 +1069,7 @@ export default function CounterBillingPage() {
                             {c.phone} • {formatPartyType(c.partyType)}
                           </div>
                         </div>
-                        <span className="text-[11px] font-mono text-gray-400">
+                        <span className="text-[11px] tabular-nums text-gray-400">
                           State: {c.stateCode || '24'}
                         </span>
                       </div>
@@ -1088,7 +1088,7 @@ export default function CounterBillingPage() {
                 id="pos-referrer"
                 value={selectedReferrerId}
                 onChange={(e) => setSelectedReferrerId(e.target.value)}
-                className="w-full bg-[#FAF8F4] border border-[#D9D3C7] rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-emerald-600"
+                className="w-full bg-surface border border-input-border rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
               >
                 <option value="">No Referrer</option>
                 {referrers.map((r) => (
@@ -1102,7 +1102,7 @@ export default function CounterBillingPage() {
               {selectedReferrer && subtotal > 0 && (
                 <div className="mt-2 bg-amber-50 border border-amber-200 rounded-lg p-2.5 text-xs text-amber-900 flex justify-between items-center">
                   <span>Commission ({commissionPercent}%):</span>
-                  <span className="font-mono font-bold text-amber-800">{formatINR(estimatedCommission)}</span>
+                  <span className="tabular-nums font-bold text-amber-800">{formatINR(estimatedCommission)}</span>
                 </div>
               )}
             </div>
@@ -1118,15 +1118,15 @@ export default function CounterBillingPage() {
                 placeholder="e.g. Deliver to Villa 42, Bopal site"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                className="w-full bg-[#FAF8F4] border border-[#D9D3C7] rounded-xl p-2.5 text-xs text-gray-900 focus:outline-none focus:border-emerald-600"
+                className="w-full bg-surface border border-input-border rounded-xl p-2.5 text-xs text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
               />
             </div>
           </div>
 
           {/* Payment & Bill Totals Card */}
-          <div className="bg-white rounded-2xl p-5 shadow-sm border border-[#E7E2D9] space-y-4">
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-border space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-gray-900 text-base font-['Space_Grotesk']">
+              <h3 className="font-bold text-gray-900 text-base">
                 Summary & Totals
               </h3>
               <span className="text-[11px] text-gray-400 italic">Preview only</span>
@@ -1135,38 +1135,38 @@ export default function CounterBillingPage() {
             <div className="space-y-2 text-sm border-b border-gray-200 pb-4">
               <div className="flex justify-between text-gray-600">
                 <span>Subtotal (Taxable Net):</span>
-                <span className="font-mono font-semibold text-gray-900">{formatINR(subtotal)}</span>
+                <span className="tabular-nums font-semibold text-gray-900">{formatINR(subtotal)}</span>
               </div>
               {docType === 'Estimate' ? (
                 <div className="flex justify-between text-gray-500 text-xs italic">
                   <span>GST (Quotation):</span>
-                  <span className="font-mono">Tax Free (₹0.00)</span>
+                  <span className="tabular-nums">Tax Free (₹0.00)</span>
                 </div>
               ) : isSameState ? (
                 <>
                   <div className="flex justify-between text-gray-600 text-xs">
                     <span>CGST (Intra-state):</span>
-                    <span className="font-mono">{formatINR(totalCgst)}</span>
+                    <span className="tabular-nums">{formatINR(totalCgst)}</span>
                   </div>
                   <div className="flex justify-between text-gray-600 text-xs">
                     <span>SGST (Intra-state):</span>
-                    <span className="font-mono">{formatINR(totalSgst)}</span>
+                    <span className="tabular-nums">{formatINR(totalSgst)}</span>
                   </div>
                 </>
               ) : (
                 <div className="flex justify-between text-gray-600 text-xs">
                   <span>IGST (Inter-state - {selectedCustomer?.stateCode || 'Out of state'}):</span>
-                  <span className="font-mono">{formatINR(totalIgst)}</span>
+                  <span className="tabular-nums">{formatINR(totalIgst)}</span>
                 </div>
               )}
               <div className="flex justify-between items-center pt-2 text-lg font-black text-gray-900">
                 <span>Grand Total:</span>
-                <span className="font-mono text-[#0B7A55] text-xl">{formatINR(grandTotal)}</span>
+                <span className="tabular-nums text-brand text-xl">{formatINR(grandTotal)}</span>
               </div>
             </div>
 
             {userNotification && (
-              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs p-3 rounded-xl font-medium">
+              <div className="bg-emerald-50 border border-emerald-200 text-brand-dark text-xs p-3 rounded-xl font-medium">
                 {userNotification}
               </div>
             )}
@@ -1201,14 +1201,14 @@ export default function CounterBillingPage() {
               className={`w-full py-3.5 px-6 rounded-xl text-white font-bold text-base shadow-md transition flex items-center justify-center gap-2 ${
                 cartItems.length === 0 || isSubmitting
                   ? 'bg-gray-400 cursor-not-allowed'
-                  : 'bg-[#0B7A55] hover:bg-[#086143]'
+                  : 'bg-brand hover:bg-brand-dark'
               }`}
             >
               <Printer className="w-5 h-5" />
               <span>
                 {isSubmitting ? 'Creating...' : `Save & Print ${docType.replace('_', ' ')}`}
               </span>
-              <kbd className="hidden sm:inline-block text-[11px] bg-black/20 text-white px-2 py-0.5 rounded font-mono font-normal">
+              <kbd className="hidden sm:inline-block text-[11px] bg-black/20 text-white px-2 py-0.5 rounded tabular-nums font-normal">
                 Ctrl+Enter
               </kbd>
             </button>
@@ -1227,7 +1227,7 @@ export default function CounterBillingPage() {
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-200 space-y-4">
             <div className="flex items-center justify-between border-b pb-3">
               <h3 id="add-customer-title" className="text-base font-bold text-gray-900 flex items-center gap-2">
-                <UserPlus className="w-5 h-5 text-emerald-700" />
+                <UserPlus className="w-5 h-5 text-brand" />
                 <span>Add New Customer / Contractor</span>
               </h3>
               <button
@@ -1257,7 +1257,7 @@ export default function CounterBillingPage() {
                   placeholder="e.g. Ramesh Patel"
                   value={newCustName}
                   onChange={(e) => setNewCustName(e.target.value)}
-                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-emerald-600"
+                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
                 />
               </div>
 
@@ -1272,7 +1272,7 @@ export default function CounterBillingPage() {
                   placeholder="e.g. 9825012345"
                   value={newCustPhone}
                   onChange={(e) => setNewCustPhone(e.target.value)}
-                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-emerald-600"
+                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
                 />
               </div>
 
@@ -1285,7 +1285,7 @@ export default function CounterBillingPage() {
                     id="new-cust-type"
                     value={newCustType}
                     onChange={(e) => setNewCustType(e.target.value)}
-                    className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-emerald-600"
+                    className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
                   >
                     <option value="Retail_Customer">Retail Customer</option>
                     <option value="Contractor">Contractor</option>
@@ -1303,7 +1303,7 @@ export default function CounterBillingPage() {
                     placeholder="24"
                     value={newCustState}
                     onChange={(e) => setNewCustState(e.target.value)}
-                    className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-emerald-600"
+                    className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
                   />
                 </div>
               </div>
@@ -1318,7 +1318,7 @@ export default function CounterBillingPage() {
                   placeholder="e.g. 24AAACG1234F1Z5"
                   value={newCustGstin}
                   onChange={(e) => setNewCustGstin(e.target.value.toUpperCase())}
-                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm uppercase text-gray-900 focus:outline-none focus:border-emerald-600"
+                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm uppercase text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
                 />
               </div>
 
@@ -1333,7 +1333,7 @@ export default function CounterBillingPage() {
                 <button
                   type="submit"
                   disabled={isSavingParty}
-                  className="px-5 py-2 rounded-xl text-xs font-bold bg-[#0B7A55] hover:bg-[#086143] text-white shadow transition"
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-brand hover:bg-brand-dark text-white shadow transition"
                 >
                   {isSavingParty ? 'Saving...' : 'Save & Select Customer'}
                 </button>
