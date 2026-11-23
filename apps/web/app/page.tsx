@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Search, Plus, Trash2, Printer, ArrowRight,
   Truck, UserCheck, ShieldAlert, Package,
-  Layers, AlertTriangle, RefreshCw
+  Layers, AlertTriangle, RefreshCw, X, UserPlus, Check
 } from 'lucide-react';
 import { apiRequest } from '@/lib/api';
 import { formatINR } from '@/lib/formatters';
@@ -32,6 +32,7 @@ interface Party {
   phone: string;
   partyType: string;
   stateCode?: string;
+  gstin?: string;
   defaultCommissionPercent?: number;
 }
 
@@ -63,6 +64,19 @@ export default function CounterBillingPage() {
   const [partiesLoading, setPartiesLoading] = useState(false);
   const [partyError, setPartyError] = useState('');
 
+  // Customer Combobox & Add Customer Modal
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
+  const [isAddCustomerModalOpen, setIsAddCustomerModalOpen] = useState(false);
+  const [newCustName, setNewCustName] = useState('');
+  const [newCustPhone, setNewCustPhone] = useState('');
+  const [newCustType, setNewCustType] = useState('Retail_Customer');
+  const [newCustState, setNewCustState] = useState('24');
+  const [newCustGstin, setNewCustGstin] = useState('');
+  const [isSavingParty, setIsSavingParty] = useState(false);
+  const [partyCreateError, setPartyCreateError] = useState('');
+  const customerComboboxRef = useRef<HTMLDivElement>(null);
+
   // Search & Variant selection
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Variant[]>([]);
@@ -84,6 +98,7 @@ export default function CounterBillingPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [userNotification, setUserNotification] = useState<string | null>(null);
 
+  const searchContainerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [activeResult, setActiveResult] = useState(-1);
   const [searchError, setSearchError] = useState('');
@@ -91,18 +106,50 @@ export default function CounterBillingPage() {
   const rateInputRef = useRef<HTMLInputElement>(null);
   const qtyInputRef = useRef<HTMLInputElement>(null);
 
+  // Autofocus search on load
   useEffect(() => {
     if (!window.matchMedia('(pointer: coarse)').matches) searchInputRef.current?.focus();
   }, []);
 
+  // Autofocus qty when a variant is selected
   useEffect(() => {
-    qtyInputRef.current?.focus();
-    qtyInputRef.current?.select();
+    if (selectedVariant) {
+      qtyInputRef.current?.focus();
+      qtyInputRef.current?.select();
+    }
   }, [selectedVariant]);
 
+  // Keep active result scrolled into view
   useEffect(() => {
     if (activeResult >= 0) document.getElementById(`sku-option-${activeResult}`)?.scrollIntoView({ block: 'nearest' });
   }, [activeResult]);
+
+  // Click-outside listener for Search dropdown and Customer dropdown
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+        setSearchResults([]);
+        setActiveResult(-1);
+      }
+      if (customerComboboxRef.current && !customerComboboxRef.current.contains(e.target as Node)) {
+        setIsCustomerDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Warn on page leave (beforeunload) when cart has items
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (cartItems.length > 0) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [cartItems.length]);
 
   // Load Customers & Referrers
   const loadParties = async () => {
@@ -152,6 +199,7 @@ export default function CounterBillingPage() {
         });
         if (!controller.signal.aborted) {
           setSearchResults(res.data || []);
+          setActiveResult(0); // Default to first result
         }
       } catch {
         if (!controller.signal.aborted) {
@@ -234,17 +282,75 @@ export default function CounterBillingPage() {
     setItemRate(0);
     setItemDiscount(0);
     setAllowOversell(false);
-    searchInputRef.current?.focus();
+    requestAnimationFrame(() => searchInputRef.current?.focus());
   };
 
-  // Remove line item
-  const handleRemoveItem = (index: number) => {
-    setCartItems((prev) => prev.filter((_, i) => i !== index));
+  // Inline update of cart item fields
+  const handleUpdateCartItem = (id: string, field: 'quantity' | 'rate' | 'discountPercent', value: any) => {
+    setCartItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item;
+        return { ...item, [field]: value };
+      })
+    );
+  };
+
+  // Remove line item by ID
+  const handleRemoveItem = (id: string) => {
+    setCartItems((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  // Quick Add Customer Handler
+  const handleCreateCustomer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCustName.trim() || !newCustPhone.trim()) {
+      setPartyCreateError('Name and phone number are required.');
+      return;
+    }
+    setIsSavingParty(true);
+    setPartyCreateError('');
+    try {
+      const res = await apiRequest('/parties', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: newCustName.trim(),
+          phone: newCustPhone.trim(),
+          partyType: newCustType,
+          stateCode: newCustState.trim() || '24',
+          gstin: newCustGstin.trim() || null,
+        }),
+      });
+
+      const newParty: Party = res.data;
+      setCustomers((prev) => [newParty, ...prev]);
+      setSelectedCustomerId(newParty.id);
+      setIsAddCustomerModalOpen(false);
+      setNewCustName('');
+      setNewCustPhone('');
+      setNewCustGstin('');
+      setUserNotification(`Customer "${newParty.name}" added and selected.`);
+      setTimeout(() => setUserNotification(null), 3500);
+    } catch (err: any) {
+      setPartyCreateError(err.message || 'Failed to create customer');
+    } finally {
+      setIsSavingParty(false);
+    }
   };
 
   // Selected customer info
   const selectedCustomer = customers.find((c) => c.id === selectedCustomerId);
   const isSameState = (selectedCustomer?.stateCode || '24') === '24'; // Store state is 24 (Gujarat)
+
+  // Filtered customer list for combobox
+  const filteredCustomers = customers.filter((c) => {
+    const q = customerSearch.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      c.name.toLowerCase().includes(q) ||
+      c.phone.includes(q) ||
+      c.partyType.toLowerCase().includes(q)
+    );
+  });
 
   // Compute money with integer paise math (preventing float drift)
   let totalTaxablePaise = 0;
@@ -254,8 +360,8 @@ export default function CounterBillingPage() {
 
   cartItems.forEach((item) => {
     const qty = parseFloat(String(item.quantity)) || 0;
-    const ratePaise = Math.round(item.rate * 100);
-    const disc = Math.min(100, Math.max(0, item.discountPercent || 0));
+    const ratePaise = Math.round(Number(item.rate || 0) * 100);
+    const disc = Math.min(100, Math.max(0, Number(item.discountPercent || 0)));
     const grossPaise = Math.round(qty * ratePaise);
     const discountPaise = Math.round((grossPaise * disc) / 100);
     const lineTaxablePaise = grossPaise - discountPaise;
@@ -315,8 +421,8 @@ export default function CounterBillingPage() {
         lineItems: cartItems.map((item) => ({
           variantId: item.variant.id,
           quantity: parseFloat(String(item.quantity)) || 1,
-          rate: item.rate,
-          discountPercent: item.discountPercent,
+          rate: Number(item.rate) || 0,
+          discountPercent: Number(item.discountPercent) || 0,
         })),
       };
 
@@ -339,26 +445,40 @@ export default function CounterBillingPage() {
   };
 
   return (
-    <div className="space-y-6" onKeyDown={(e) => {
-      if (e.defaultPrevented || e.nativeEvent.isComposing || e.repeat || createdTransaction) return;
-      if (e.key === 'F2') {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-      }
-      if (e.key === 'F8' && !searchResults.length && !selectedVariant && !submitLock.current) {
-        e.preventDefault();
-        setDocType(current => current === 'Delivery_Challan' ? 'Tax_Invoice' : current === 'Tax_Invoice' ? 'Estimate' : 'Delivery_Challan');
-      }
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !selectedVariant && !searchResults.length) {
-        e.preventDefault();
-        void handleSubmit();
-      }
-    }}>
+    <div
+      className="space-y-6"
+      onKeyDown={(e) => {
+        if (e.defaultPrevented || e.nativeEvent.isComposing || createdTransaction) return;
+        // F2: Focus SKU Search
+        if (e.key === 'F2') {
+          e.preventDefault();
+          searchInputRef.current?.focus();
+          searchInputRef.current?.select();
+        }
+        // F8: Cycle document type
+        if (e.key === 'F8' && !searchResults.length && !selectedVariant && !submitLock.current) {
+          e.preventDefault();
+          setDocType((current) =>
+            current === 'Delivery_Challan'
+              ? 'Tax_Invoice'
+              : current === 'Tax_Invoice'
+              ? 'Estimate'
+              : 'Delivery_Challan'
+          );
+        }
+        // Ctrl+Enter or Cmd+Enter: Save & Print
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          void handleSubmit();
+        }
+      }}
+    >
       {/* Top Banner: Mode & Settings Switcher */}
       <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#E7E2D9] flex flex-wrap items-center justify-between gap-4">
         {/* Document Mode Switcher */}
         <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl">
           <button
+            type="button"
             aria-pressed={docType === 'Delivery_Challan'}
             onClick={() => setDocType('Delivery_Challan')}
             className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
@@ -370,6 +490,7 @@ export default function CounterBillingPage() {
             Delivery Challan
           </button>
           <button
+            type="button"
             aria-pressed={docType === 'Tax_Invoice'}
             onClick={() => setDocType('Tax_Invoice')}
             className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
@@ -381,6 +502,7 @@ export default function CounterBillingPage() {
             GST Tax Invoice
           </button>
           <button
+            type="button"
             aria-pressed={docType === 'Estimate'}
             onClick={() => setDocType('Estimate')}
             className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
@@ -420,29 +542,34 @@ export default function CounterBillingPage() {
           </div>
         )}
 
-        {/* Transport Details */}
-        <div className="flex items-center gap-2 text-sm">
-          <Truck className="w-4 h-4 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Vehicle / Tempo No. (e.g. GJ01AB1234)"
-            value={transportDetails}
-            onChange={(e) => setTransportDetails(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs w-56 focus:outline-none focus:border-emerald-600"
-          />
-        </div>
+        {/* Transport Details (hidden for Estimate) */}
+        {docType !== 'Estimate' && (
+          <div className="flex items-center gap-2 text-sm w-full md:w-auto">
+            <Truck className="w-4 h-4 text-gray-400 shrink-0" />
+            <input
+              type="text"
+              placeholder="Vehicle / Tempo No. (e.g. GJ01AB1234)"
+              value={transportDetails}
+              onChange={(e) => setTransportDetails(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs w-full md:w-56 focus:outline-none focus:border-emerald-600"
+            />
+          </div>
+        )}
       </div>
 
       {/* Main Grid: Left = Item Entry & Cart, Right = Customer & Billing Summary */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         {/* Left Column (2 Cols): Quick Autocomplete & Cart Table */}
-        <div className="min-w-0 xl:col-span-2 space-y-6">
+        <div className="min-w-0 lg:col-span-2 space-y-6">
           {/* Quick Search & Fast Entry Bar */}
-          <div className="bg-white rounded-2xl p-5 shadow-sm border border-[#E7E2D9] space-y-4">
+          <div ref={searchContainerRef} className="bg-white rounded-2xl p-5 shadow-sm border border-[#E7E2D9] space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-base font-bold text-gray-900 font-['Space_Grotesk'] flex items-center gap-2">
                 <Search className="w-4 h-4 text-[#0B7A55]" />
                 <span>Instant Shade & SKU Search</span>
+                <span className="text-[11px] font-normal bg-gray-100 text-gray-600 border border-gray-200 px-1.5 py-0.5 rounded font-mono">
+                  F2
+                </span>
               </h2>
               <span className="text-xs text-gray-500">
                 Type shade code, brand or finish (e.g. <span className="font-mono text-emerald-700 font-semibold">"21094 suede"</span>)
@@ -461,29 +588,34 @@ export default function CounterBillingPage() {
                 autoComplete="off"
                 aria-controls={searchResults.length ? 'sku-results' : undefined}
                 aria-activedescendant={activeResult >= 0 ? `sku-option-${activeResult}` : undefined}
-                onBlur={() => { setSearchResults([]); setActiveResult(-1); }}
                 onKeyDown={(e) => {
-                  if (e.nativeEvent.isComposing || e.ctrlKey || e.metaKey || e.altKey) return;
-                  if (!searchResults.length) return;
-                  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                  if (e.nativeEvent.isComposing) return;
+                  if (e.key === 'ArrowDown') {
+                    if (!searchResults.length) return;
                     e.preventDefault();
-                    const delta = e.key === 'ArrowDown' ? 1 : -1;
-                    setActiveResult(i => i < 0 ? (delta === 1 ? 0 : searchResults.length - 1) : (i + delta + searchResults.length) % searchResults.length);
-                  } else if (e.key === 'Enter' && activeResult >= 0) {
+                    setActiveResult((i) => (i < searchResults.length - 1 ? i + 1 : 0));
+                  } else if (e.key === 'ArrowUp') {
+                    if (!searchResults.length) return;
                     e.preventDefault();
-                    handleSelectVariant(searchResults[activeResult]);
+                    setActiveResult((i) => (i > 0 ? i - 1 : searchResults.length - 1));
+                  } else if (e.key === 'Enter') {
+                    if (searchResults.length > 0) {
+                      e.preventDefault();
+                      const chosen = activeResult >= 0 ? searchResults[activeResult] : searchResults[0];
+                      handleSelectVariant(chosen);
+                    }
                   } else if (e.key === 'Escape') {
                     e.preventDefault();
+                    setSearchQuery('');
                     setSearchResults([]);
                     setActiveResult(-1);
                   }
                 }}
                 ref={searchInputRef}
                 type="text"
-                placeholder="Brand, shade code or finish"
+                placeholder="Search brand, shade code, finish or size... (Press F2)"
                 value={searchQuery}
                 onChange={(e) => {
-                  setSearchResults([]);
                   setActiveResult(-1);
                   setSearchError('');
                   setIsSearching(Boolean(e.target.value.trim()));
@@ -492,19 +624,35 @@ export default function CounterBillingPage() {
                 className="w-full bg-[#FAF8F4] border border-[#D9D3C7] rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#0B7A55] focus:bg-white text-gray-900 shadow-inner"
               />
 
-              <p id="pos-shortcuts" className="mt-2 text-xs text-content-muted">F2 Search · ↑ ↓ Choose · Enter Select · F8 Change document · Ctrl/⌘ + Enter Save &amp; Print</p>
-              <p role="status" className="sr-only">{isSearching ? 'Searching' : searchQuery && !searchError ? `${searchResults.length} suggestions` : ''}</p>
+              <p id="pos-shortcuts" className="mt-2 text-xs text-gray-500">
+                <kbd className="font-semibold text-gray-700">F2</kbd> Search · <kbd className="font-semibold text-gray-700">↑ ↓</kbd> Choose · <kbd className="font-semibold text-gray-700">Enter</kbd> Select · <kbd className="font-semibold text-gray-700">Esc</kbd> Clear · <kbd className="font-semibold text-gray-700">Ctrl+Enter</kbd> Save &amp; Print
+              </p>
+              <p role="status" className="sr-only">
+                {isSearching ? 'Searching' : searchQuery && !searchError ? `${searchResults.length} suggestions` : ''}
+              </p>
               {searchError && <p role="alert" className="mt-2 text-sm text-red-800">{searchError}</p>}
+              
               {isSearching && (
-                <div className="mt-2 p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-600 flex items-center gap-2 animate-pulse">
+                <div role="status" className="mt-2 p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-600 flex items-center gap-2 animate-pulse">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-700" />
                   <span>Searching catalog variants...</span>
                 </div>
               )}
-              {searchQuery.trim() && !isSearching && !searchError && !searchResults.length && <p className="mt-2 text-sm text-gray-700">No suggestions displayed. Refine your search.</p>}
+
+              {searchQuery.trim() && !isSearching && !searchError && searchResults.length === 0 && (
+                <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">
+                  No matching variants found for <span className="font-bold">"{searchQuery}"</span>. Try searching by brand, finish, or code.
+                </div>
+              )}
+
               {/* Autocomplete Dropdown */}
               {searchResults.length > 0 && (
-                <div id="sku-results" role="listbox" aria-label="Matching variants" className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-30 max-h-72 overflow-y-auto divide-y divide-gray-100">
+                <div
+                  id="sku-results"
+                  role="listbox"
+                  aria-label="Matching variants"
+                  className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-30 max-h-72 overflow-y-auto divide-y divide-gray-100"
+                >
                   {searchResults.map((v, index) => {
                     const showroomStock = v.stockLedgers?.find((s) => s.location === 'Showroom')?.quantityOnHand || 0;
                     const godownStock = v.stockLedgers?.find((s) => s.location === 'Godown')?.quantityOnHand || 0;
@@ -515,12 +663,16 @@ export default function CounterBillingPage() {
                         id={`sku-option-${index}`}
                         role="option"
                         aria-selected={activeResult === index}
-                        onPointerDown={(event) => { event.preventDefault(); }}
-                        onClick={() => handleSelectVariant(v)}
-                        className={`flex min-h-11 w-full cursor-pointer items-center justify-between gap-3 p-3 text-left text-sm hover:bg-primary-tint ${activeResult === index ? "bg-primary-tint ring-2 ring-inset ring-primary" : ""}`}
+                        onMouseDown={(event) => {
+                          event.preventDefault(); // Prevent input blur before click fires
+                          handleSelectVariant(v);
+                        }}
+                        className={`flex min-h-11 w-full cursor-pointer items-center justify-between gap-3 p-3 text-left text-sm transition ${
+                          activeResult === index ? 'bg-emerald-50 ring-2 ring-inset ring-emerald-600' : 'hover:bg-gray-50'
+                        }`}
                       >
                         <div>
-                          <div className="font-bold text-gray-900 group-hover:text-emerald-800">
+                          <div className="font-bold text-gray-900">
                             {v.brand} - {v.designCode} ({v.designName})
                           </div>
                           <div className="text-xs text-gray-500">
@@ -530,10 +682,22 @@ export default function CounterBillingPage() {
 
                         <div className="flex items-center gap-3 text-right">
                           <div className="text-xs space-y-1">
-                            <div className={`px-2 py-0.5 rounded ${dispatchFrom === 'Godown' ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300' : 'text-gray-600'}`}>
+                            <div
+                              className={`px-2 py-0.5 rounded ${
+                                dispatchFrom === 'Godown'
+                                  ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300'
+                                  : 'text-gray-600'
+                              }`}
+                            >
                               Godown: <span className="font-bold">{godownStock}</span>
                             </div>
-                            <div className={`px-2 py-0.5 rounded ${dispatchFrom === 'Showroom' ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300' : 'text-gray-600'}`}>
+                            <div
+                              className={`px-2 py-0.5 rounded ${
+                                dispatchFrom === 'Showroom'
+                                  ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300'
+                                  : 'text-gray-600'
+                              }`}
+                            >
                               Showroom: <span className="font-bold">{showroomStock}</span>
                             </div>
                           </div>
@@ -578,16 +742,19 @@ export default function CounterBillingPage() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-3 pt-1 xl:grid-cols-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1">
                   <div>
-                    <label htmlFor="line-qty" className="text-xs font-semibold text-gray-600 block mb-1">Quantity ({selectedVariant.unit})</label>
+                    <label htmlFor="line-qty" className="text-xs font-semibold text-gray-600 block mb-1">
+                      Quantity ({selectedVariant.unit})
+                    </label>
                     <input
                       id="line-qty"
                       ref={qtyInputRef}
-                      onKeyDown={e => {
+                      onKeyDown={(e) => {
                         if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.nativeEvent.isComposing) {
                           e.preventDefault();
-                          if (e.currentTarget.reportValidity()) { rateInputRef.current?.focus(); rateInputRef.current?.select(); }
+                          rateInputRef.current?.focus();
+                          rateInputRef.current?.select();
                         }
                       }}
                       type="number"
@@ -602,7 +769,9 @@ export default function CounterBillingPage() {
                   </div>
 
                   <div>
-                    <label htmlFor="line-rate" className="text-xs font-semibold text-gray-600 block mb-1">Selling Rate (₹)</label>
+                    <label htmlFor="line-rate" className="text-xs font-semibold text-gray-600 block mb-1">
+                      Selling Rate (₹)
+                    </label>
                     <input
                       type="number"
                       ref={rateInputRef}
@@ -616,7 +785,9 @@ export default function CounterBillingPage() {
                   </div>
 
                   <div>
-                    <label htmlFor="pos-discount" className="text-xs font-semibold text-gray-600 block mb-1">Discount %</label>
+                    <label htmlFor="pos-discount" className="text-xs font-semibold text-gray-600 block mb-1">
+                      Discount %
+                    </label>
                     <input
                       type="number"
                       min="0"
@@ -642,20 +813,20 @@ export default function CounterBillingPage() {
             )}
           </div>
 
-          {/* Line Items Table */}
+          {/* Line Items Table with Inline Editing */}
           <div className="bg-white rounded-2xl shadow-sm border border-[#E7E2D9] overflow-hidden">
             <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-gray-50/50">
               <h3 className="font-bold text-gray-900 text-sm font-['Space_Grotesk']">
                 Billed Items ({cartItems.length})
               </h3>
-              <span className="text-xs text-gray-500">Live Item Ledger</span>
+              <span className="text-xs text-gray-500">Edit Quantity, Rate or Disc inline</span>
             </div>
 
             {cartItems.length === 0 ? (
               <div className="p-12 text-center text-gray-400">
                 <Package className="w-12 h-12 mx-auto stroke-[1.2] mb-3 text-gray-300" />
                 <p className="font-medium text-sm">No items in the bill yet.</p>
-                <p className="text-xs text-gray-400 mt-1">Use the search box above to add laminates or hardware.</p>
+                <p className="text-xs text-gray-400 mt-1">Press <kbd className="bg-gray-100 text-gray-700 px-1 py-0.5 rounded text-[11px] font-mono">F2</kbd> to search and add laminates or hardware.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -664,10 +835,10 @@ export default function CounterBillingPage() {
                     <tr>
                       <th className="py-3 px-4">#</th>
                       <th className="py-3 px-4">Brand & Design</th>
-                      <th className="py-3 px-4">Finish / Thickness</th>
-                      <th className="py-3 px-4 text-center">Qty</th>
-                      <th className="py-3 px-4 text-right">Rate</th>
-                      <th className="py-3 px-4 text-right">Disc %</th>
+                      <th className="py-3 px-4">Finish / Thick</th>
+                      <th className="py-3 px-3 text-center">Qty</th>
+                      <th className="py-3 px-3 text-right">Rate (₹)</th>
+                      <th className="py-3 px-3 text-right">Disc %</th>
                       <th className="py-3 px-4 text-right">Total</th>
                       <th className="py-3 px-4 text-center">Action</th>
                     </tr>
@@ -675,11 +846,11 @@ export default function CounterBillingPage() {
                   <tbody className="divide-y divide-gray-200">
                     {cartItems.map((item, idx) => {
                       const qty = parseFloat(String(item.quantity)) || 0;
-                      const lineGross = qty * item.rate;
-                      const lineNet = lineGross - lineGross * (item.discountPercent / 100);
+                      const lineGross = qty * Number(item.rate || 0);
+                      const lineNet = lineGross - lineGross * (Number(item.discountPercent || 0) / 100);
 
                       return (
-                        <tr key={item.id || idx} className="hover:bg-gray-50 transition">
+                        <tr key={item.id} className="hover:bg-gray-50 transition">
                           <td className="py-3 px-4 text-gray-400">{idx + 1}</td>
                           <td className="py-3 px-4 font-bold text-gray-900">
                             {item.variant.brand} {item.variant.designCode}
@@ -688,20 +859,63 @@ export default function CounterBillingPage() {
                           <td className="py-3 px-4 text-gray-600 text-xs">
                             {item.variant.finish} | {item.variant.thicknessMm}mm
                           </td>
-                          <td className="py-3 px-4 text-center font-bold text-gray-900">
-                            {item.quantity} {item.variant.unit}
+                          <td className="py-2 px-3 text-center">
+                            <div className="inline-flex items-center gap-1">
+                              <input
+                                type="number"
+                                min="0.01"
+                                step="any"
+                                value={item.quantity}
+                                onChange={(e) => handleUpdateCartItem(item.id, 'quantity', e.target.value)}
+                                onBlur={() => {
+                                  const val = parseFloat(String(item.quantity)) || 0;
+                                  if (val <= 0) handleUpdateCartItem(item.id, 'quantity', 1);
+                                }}
+                                aria-label={`Quantity for line ${idx + 1}: ${item.variant.designCode}`}
+                                className="w-16 bg-white border border-gray-300 rounded px-1.5 py-1 text-center text-sm font-bold text-gray-900 focus:outline-none focus:border-emerald-600 shadow-sm"
+                              />
+                              <span className="text-xs text-gray-500">{item.variant.unit}</span>
+                            </div>
                           </td>
-                          <td className="py-3 px-4 text-right font-mono">{formatINR(item.rate)}</td>
-                          <td className="py-3 px-4 text-right font-mono text-gray-500">
-                            {item.discountPercent > 0 ? `${item.discountPercent}%` : '-'}
+                          <td className="py-2 px-3 text-right">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={item.rate}
+                              onChange={(e) =>
+                                handleUpdateCartItem(item.id, 'rate', Math.max(0, parseFloat(e.target.value) || 0))
+                              }
+                              aria-label={`Rate for line ${idx + 1}: ${item.variant.designCode}`}
+                              className="w-24 bg-white border border-gray-300 rounded px-1.5 py-1 text-right text-sm font-mono font-bold text-gray-900 focus:outline-none focus:border-emerald-600 shadow-sm"
+                            />
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="1"
+                              value={item.discountPercent}
+                              onChange={(e) =>
+                                handleUpdateCartItem(
+                                  item.id,
+                                  'discountPercent',
+                                  Math.min(100, Math.max(0, parseFloat(e.target.value) || 0))
+                                )
+                              }
+                              aria-label={`Discount for line ${idx + 1}: ${item.variant.designCode}`}
+                              className="w-16 bg-white border border-gray-300 rounded px-1.5 py-1 text-right text-sm font-mono text-gray-700 focus:outline-none focus:border-emerald-600 shadow-sm"
+                            />
                           </td>
                           <td className="py-3 px-4 text-right font-mono font-bold text-gray-900">
                             {formatINR(lineNet)}
                           </td>
                           <td className="py-3 px-4 text-center">
                             <button
-                              onClick={() => handleRemoveItem(idx)}
-                              aria-label={`Remove line ${idx + 1}: ${item.variant.designCode}`}
+                              type="button"
+                              onClick={() => handleRemoveItem(item.id)}
+                              aria-label={`Remove line ${idx + 1}: ${item.variant.brand} ${item.variant.designCode}`}
                               title={`Remove line ${idx + 1}`}
                               className="text-red-500 hover:text-red-700 inline-grid min-h-11 min-w-11 place-items-center rounded-lg hover:bg-red-50 transition"
                             >
@@ -718,41 +932,155 @@ export default function CounterBillingPage() {
           </div>
         </div>
 
-        {/* Right Column: Customer Selection, Commission & Summary */}
-        <div className="space-y-6">
+        {/* Right Column: Customer Combobox, Commission & Summary */}
+        <div className="space-y-6 lg:sticky lg:top-6">
           {/* Party & Referrer Card */}
           <div className="bg-white rounded-2xl p-5 shadow-sm border border-[#E7E2D9] space-y-4">
-            <h3 className="font-bold text-gray-900 text-base font-['Space_Grotesk'] flex items-center gap-2">
-              <UserCheck className="w-4 h-4 text-[#0B7A55]" />
-              <span>Customer & Referrer</span>
+            <h3 className="font-bold text-gray-900 text-base font-['Space_Grotesk'] flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <UserCheck className="w-4 h-4 text-[#0B7A55]" />
+                <span>Customer &amp; Referrer</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsAddCustomerModalOpen(true)}
+                className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold flex items-center gap-1 bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-200 transition"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>+ Add Customer</span>
+              </button>
             </h3>
 
-            {/* Customer Dropdown */}
-            <div>
-              <label htmlFor="pos-customer" className="text-xs font-semibold text-gray-600 block mb-1">
+            {/* Customer Searchable Combobox */}
+            <div ref={customerComboboxRef} className="relative">
+              <label htmlFor="customer-combobox-input" className="text-xs font-semibold text-gray-600 block mb-1">
                 Billed To (Customer / Contractor) <span className="text-red-500">*</span>
               </label>
-              <select
-                id="pos-customer"
-                value={selectedCustomerId}
-                onChange={(e) => {
-                  setSelectedCustomerId(e.target.value);
-                  setErrorMessage(null);
-                }}
-                className="w-full bg-[#FAF8F4] border border-[#D9D3C7] rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-emerald-600 font-medium"
-              >
-                <option value="">-- Select Customer or Cash Walk-in --</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.phone}) — {formatPartyType(c.partyType)}
-                  </option>
-                ))}
-              </select>
+
+              {selectedCustomer ? (
+                <div className="bg-[#FAF8F4] border border-[#0B7A55] rounded-xl p-3 flex items-center justify-between">
+                  <div>
+                    <div className="font-bold text-gray-900 text-sm flex items-center gap-1.5">
+                      <Check className="w-4 h-4 text-emerald-600" />
+                      <span>{selectedCustomer.name}</span>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {selectedCustomer.phone} • {formatPartyType(selectedCustomer.partyType)} (State: {selectedCustomer.stateCode || '24'})
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCustomerId('');
+                      setCustomerSearch('');
+                      setIsCustomerDropdownOpen(true);
+                    }}
+                    className="text-xs text-gray-500 hover:text-red-600 px-2 py-1 rounded hover:bg-gray-100 font-medium transition"
+                  >
+                    Change
+                  </button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <input
+                    id="customer-combobox-input"
+                    type="text"
+                    role="combobox"
+                    aria-expanded={isCustomerDropdownOpen}
+                    aria-controls="customer-combobox-list"
+                    autoComplete="off"
+                    placeholder="Search name, phone or type..."
+                    value={customerSearch}
+                    onFocus={() => setIsCustomerDropdownOpen(true)}
+                    onChange={(e) => {
+                      setCustomerSearch(e.target.value);
+                      setIsCustomerDropdownOpen(true);
+                    }}
+                    className="w-full bg-[#FAF8F4] border border-[#D9D3C7] rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-emerald-600 font-medium"
+                  />
+                  {customerSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setCustomerSearch('')}
+                      className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Combobox Dropdown */}
+              {!selectedCustomerId && isCustomerDropdownOpen && (
+                <div
+                  id="customer-combobox-list"
+                  role="listbox"
+                  className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-20 max-h-60 overflow-y-auto divide-y divide-gray-100"
+                >
+                  <div className="p-2 bg-gray-50 flex items-center justify-between text-xs text-gray-500 border-b border-gray-200">
+                    <span>{filteredCustomers.length} customers found</span>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setIsAddCustomerModalOpen(true);
+                        setIsCustomerDropdownOpen(false);
+                      }}
+                      className="text-emerald-700 font-bold hover:underline"
+                    >
+                      + Create New
+                    </button>
+                  </div>
+                  {filteredCustomers.length === 0 ? (
+                    <div className="p-4 text-center text-xs text-gray-500">
+                      No matching customer found.
+                      <button
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setIsAddCustomerModalOpen(true);
+                          setIsCustomerDropdownOpen(false);
+                        }}
+                        className="block mx-auto mt-2 text-emerald-700 font-semibold"
+                      >
+                        + Add "{customerSearch}" as customer
+                      </button>
+                    </div>
+                  ) : (
+                    filteredCustomers.map((c) => (
+                      <div
+                        key={c.id}
+                        role="option"
+                        aria-selected={selectedCustomerId === c.id}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setSelectedCustomerId(c.id);
+                          setIsCustomerDropdownOpen(false);
+                          setErrorMessage(null);
+                        }}
+                        className="p-2.5 hover:bg-emerald-50 cursor-pointer text-sm flex items-center justify-between"
+                      >
+                        <div>
+                          <div className="font-bold text-gray-900">{c.name}</div>
+                          <div className="text-xs text-gray-500">
+                            {c.phone} • {formatPartyType(c.partyType)}
+                          </div>
+                        </div>
+                        <span className="text-[11px] font-mono text-gray-400">
+                          State: {c.stateCode || '24'}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Carpenter / Architect Referrer Dropdown */}
             <div>
-              <label htmlFor="pos-referrer" className="text-xs font-semibold text-gray-600 block mb-1">Tag Carpenter / Architect (Optional)</label>
+              <label htmlFor="pos-referrer" className="text-xs font-semibold text-gray-600 block mb-1">
+                Tag Carpenter / Architect (Optional)
+              </label>
               <select
                 id="pos-referrer"
                 value={selectedReferrerId}
@@ -778,8 +1106,11 @@ export default function CounterBillingPage() {
 
             {/* Bill Notes */}
             <div>
-              <label className="text-xs font-semibold text-gray-600 block mb-1">Remarks / Site Address</label>
+              <label htmlFor="pos-notes" className="text-xs font-semibold text-gray-600 block mb-1">
+                Remarks / Site Address
+              </label>
               <textarea
+                id="pos-notes"
                 rows={2}
                 placeholder="e.g. Deliver to Villa 42, Bopal site"
                 value={notes}
@@ -874,16 +1205,149 @@ export default function CounterBillingPage() {
               <span>
                 {isSubmitting ? 'Creating...' : `Save & Print ${docType.replace('_', ' ')}`}
               </span>
+              <kbd className="hidden sm:inline-block text-[11px] bg-black/20 text-white px-2 py-0.5 rounded font-mono font-normal">
+                Ctrl+Enter
+              </kbd>
             </button>
           </div>
         </div>
       </div>
 
+      {/* Quick Add Customer Modal */}
+      {isAddCustomerModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="add-customer-title"
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-200 space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <h3 id="add-customer-title" className="text-base font-bold text-gray-900 flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-emerald-700" />
+                <span>Add New Customer / Contractor</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsAddCustomerModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 rounded-lg p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {partyCreateError && (
+              <div role="alert" className="p-3 bg-red-50 text-red-700 text-xs rounded-xl border border-red-200">
+                {partyCreateError}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateCustomer} className="space-y-3">
+              <div>
+                <label htmlFor="new-cust-name" className="text-xs font-semibold text-gray-700 block mb-1">
+                  Full Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="new-cust-name"
+                  type="text"
+                  required
+                  placeholder="e.g. Ramesh Patel"
+                  value={newCustName}
+                  onChange={(e) => setNewCustName(e.target.value)}
+                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="new-cust-phone" className="text-xs font-semibold text-gray-700 block mb-1">
+                  Phone Number <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="new-cust-phone"
+                  type="tel"
+                  required
+                  placeholder="e.g. 9825012345"
+                  value={newCustPhone}
+                  onChange={(e) => setNewCustPhone(e.target.value)}
+                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="new-cust-type" className="text-xs font-semibold text-gray-700 block mb-1">
+                    Party Type
+                  </label>
+                  <select
+                    id="new-cust-type"
+                    value={newCustType}
+                    onChange={(e) => setNewCustType(e.target.value)}
+                    className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-emerald-600"
+                  >
+                    <option value="Retail_Customer">Retail Customer</option>
+                    <option value="Contractor">Contractor</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label htmlFor="new-cust-state" className="text-xs font-semibold text-gray-700 block mb-1">
+                    State Code (GST)
+                  </label>
+                  <input
+                    id="new-cust-state"
+                    type="text"
+                    maxLength={2}
+                    placeholder="24"
+                    value={newCustState}
+                    onChange={(e) => setNewCustState(e.target.value)}
+                    className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="new-cust-gstin" className="text-xs font-semibold text-gray-700 block mb-1">
+                  GSTIN (Optional)
+                </label>
+                <input
+                  id="new-cust-gstin"
+                  type="text"
+                  placeholder="e.g. 24AAACG1234F1Z5"
+                  value={newCustGstin}
+                  onChange={(e) => setNewCustGstin(e.target.value.toUpperCase())}
+                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm uppercase text-gray-900 focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddCustomerModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 hover:bg-gray-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingParty}
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-[#0B7A55] hover:bg-[#086143] text-white shadow transition"
+                >
+                  {isSavingParty ? 'Saving...' : 'Save & Select Customer'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Printable Invoice Modal */}
       {createdTransaction && (
         <PrintModal
           transaction={createdTransaction}
-          onClose={() => { setCreatedTransaction(null); requestAnimationFrame(() => searchInputRef.current?.focus()); }}
+          onClose={() => {
+            setCreatedTransaction(null);
+            requestAnimationFrame(() => searchInputRef.current?.focus());
+          }}
         />
       )}
     </div>
