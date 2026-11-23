@@ -1,23 +1,38 @@
-/**
- * Indian Rupee & Square Foot currency formatters for Lammart
- */
+// -------------------------------------------------
+// Currency and Date Formatters
+// -------------------------------------------------
 
-export function formatPrice(paise: number, showPaise = false): string {
-  const rupees = paise / 100;
+export function formatINR(amount: number | string | null | undefined): string {
+  if (amount == null) return '₹0.00';
+  const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+  if (isNaN(num)) return '₹0.00';
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: 'INR',
-    minimumFractionDigits: showPaise ? 2 : 0,
-    maximumFractionDigits: showPaise ? 2 : 0,
-  }).format(rupees);
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(num);
 }
 
-export function formatSqftPrice(paise: number, sqftArea = 32): string {
-  const rupees = paise / 100;
-  const perSqft = rupees / sqftArea;
-  return `₹ ${perSqft.toFixed(2)} / sq ft`;
+export function formatDate(dateString: string | Date | null | undefined): string {
+  if (!dateString) return '-';
+  const d = new Date(dateString);
+  return d.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
 }
 
-export function formatNumber(num: number): string {
-  return new Intl.NumberFormat('en-IN').format(num);
+export function formatDateTime(dateString: string | Date | null | undefined): string {
+  if (!dateString) return '-';
+  const d = new Date(dateString);
+  return d.toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
 }

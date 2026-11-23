@@ -1,0 +1,1457 @@
+diff --git a/README.md b/README.md
+index dc0149f..e7c9b7a 100644
+--- a/README.md
++++ b/README.md
+@@ -28,7 +28,35 @@ Use Node.js 22.16 or later in the 22.x series, or Node.js 24 or later. Node's bu
+ 2. Run `npm ci` and `npm run build`. Deploy the built workspaces and their runtime dependencies, including `apps/api/src/db/migrations`.
+ 3. Run `DB_PATH=/absolute/persistent/path/store.db NODE_ENV=production npm run start:api`, then `npm run start:web`. The API binds to loopback by default. If the API runs in a separate private network, set `HOST` and restrict access to the storefront or trusted ingress. Serve the storefront over HTTPS.
+ 4. Use a fresh SQLite file if replacing the old demo database. Existing databases are never erased or reseeded. Back up any real data before switching files or running migrations. Use a durable local volume, a single API instance per database, and a tested backup schedule.
+-5. Load verified catalog, media and delivery coverage before advertising listings. Maintain an operator process for reviewing saved enquiries. Publish the business’s actual terms and privacy details before public launch. The repository does not include a catalog admin UI, order processing, payments, or outbound enquiry notifications.
++<!-- coderabbit-ai-generated:v1 -->
++
++<!-- coderabbit-ai-generated-section:v1:ec97ada59f2b7cf3705c07ca4c12bd3fa19f0c5436b893998b1a43638c00577a -->
++
++5. Load verified catalog, media and delivery coverage before advertising listings. Publish the business’s actual terms and privacy details before public launch. Order processing, payments, and outbound enquiry notifications are not implemented.
++
++## Administration
++
++Create the first admin locally using the same database as the API. Choose a unique password of 12–128 characters. The app never creates a default administrator.
++
++PowerShell, from the repository root:
++
++```powershell
++$env:ADMIN_EMAIL = Read-Host 'Admin email'
++$secret = Read-Host 'Admin password' -AsSecureString
++$env:ADMIN_PASSWORD = [System.Net.NetworkCredential]::new('', $secret).Password
++npm run admin:create
++Remove-Item Env:ADMIN_PASSWORD
++```
++
++Set `DB_PATH` first if the API uses a custom database path. For a compiled production deployment, set `DB_PATH`, `NODE_ENV=production`, and the same admin environment variables, then run `node apps/api/dist/modules/auth/create-admin.js`. To reset an existing admin password locally, run `npm run admin:create -- --reset-password`. The reset revokes previous sessions. The published demo password cannot be used to sign in as an admin on an older database; reset it before use.
++
++With the app running, visit `/admin`. Add a category and optional brand, create a product, then add a priced variant. Its thickness and finish become storefront filter values. Products can be hidden without deleting their database records. The panel also shows incoming enquiries and lets administrators manage other accounts.
++
++Visitors can register as customers at `/account`. Only admins can open the panel, read admin data, or change account roles. Dealers and customers can sign in to their own accounts; dealer-specific pricing and workflows are not part of this update. Changing an account’s role or active status signs that account out. Admins cannot change their own access.
++
++The storefront and API should be served through the same origin. Use HTTPS in production; the session cookie is marked Secure there.
++
++<!-- /coderabbit-ai-generated:v1 -->
+ 
+ <!-- /coderabbit-ai-generated:v1 -->
+ 
+diff --git a/apps/api/package.json b/apps/api/package.json
+index f2c619f..0baccb9 100644
+--- a/apps/api/package.json
++++ b/apps/api/package.json
+@@ -9,7 +9,8 @@
+     "dev": "tsx watch src/index.ts",
+     "test": "vitest run",
+     "migrate": "tsx src/db/migrate.ts",
+-    "start": "node dist/index.js"
++    "start": "node dist/index.js",
++    "admin:create": "tsx src/modules/auth/create-admin.ts"
+   },
+   "dependencies": {
+     "@lammart/shared": "*",
+@@ -22,7 +23,8 @@
+     "pino": "^9.5.0",
+     "pino-http": "^10.3.0",
+     "dotenv": "^16.4.5",
+-    "zod": "^4.6.7"
++    "zod": "^4.6.7",
++    "bcrypt": "^6.0.0"
+   },
+   "devDependencies": {
+     "@types/express": "^4.17.21",
+@@ -36,7 +38,6 @@
+     "vitest": "^2.1.4",
+     "tsx": "^4.19.2",
+     "typescript": "^5.6.3",
+-    "rimraf": "^6.0.1",
+-    "bcrypt": "^6.0.0"
++    "rimraf": "^6.0.1"
+   }
+ }
+diff --git a/apps/api/src/app.ts b/apps/api/src/app.ts
+index c2bee27..892c742 100644
+--- a/apps/api/src/app.ts
++++ b/apps/api/src/app.ts
+@@ -1,9 +1,11 @@
+-import express, { Express, Request, Response } from 'express';
++import express, { Express, Request, Response, ErrorRequestHandler } from 'express';
+ import cors from 'cors';
+ import helmet from 'helmet';
+ import { config } from './config';
+ import { contactRouter } from './modules/contact/contact.router';
+ import { catalogRouter } from './modules/catalog/catalog.router';
++import { authRouter } from './modules/auth/auth.router';
++import { adminRouter } from './modules/admin/admin.router';
+ 
+ export const createApp = (): Express => {
+   const app = express();
+@@ -28,6 +30,15 @@ export const createApp = (): Express => {
+   // Mount API modules
+   app.use('/api/v1', catalogRouter);
+   app.use('/api/v1', contactRouter);
++  app.use('/api/v1', authRouter);
++  app.use('/api/v1/admin', adminRouter);
++
++  const handleError: ErrorRequestHandler = (error, _req, res, next) => {
++    if (res.headersSent) return next(error);
++    const status = error.status === 400 || error.status === 413 ? error.status : 500;
++    res.status(status).json({ error: status === 500 ? 'Unable to complete the request.' : 'Invalid request body.' });
++  };
++  app.use(handleError);
+ 
+   return app;
+ };
+diff --git a/apps/api/src/db/migrations/003_auth_sessions.sql b/apps/api/src/db/migrations/003_auth_sessions.sql
+new file mode 100644
+index 0000000..c1b4334
+--- /dev/null
++++ b/apps/api/src/db/migrations/003_auth_sessions.sql
+@@ -0,0 +1,8 @@
++CREATE TABLE auth_sessions (
++  token_hash TEXT PRIMARY KEY,
++  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
++  expires_at INTEGER NOT NULL
++);
++
++CREATE INDEX idx_auth_sessions_user ON auth_sessions(user_id);
++CREATE INDEX idx_auth_sessions_expiry ON auth_sessions(expires_at);
+diff --git a/apps/api/src/modules/admin/admin.router.ts b/apps/api/src/modules/admin/admin.router.ts
+new file mode 100644
+index 0000000..3907ef6
+--- /dev/null
++++ b/apps/api/src/modules/admin/admin.router.ts
+@@ -0,0 +1,287 @@
++import { randomUUID } from 'node:crypto';
++import { Router, type Request, type Response, type RequestHandler } from 'express';
++import { z } from 'zod';
++import { createBrandSchema, createCategorySchema, createProductSchema, createVariantSchema } from '@lammart/shared';
++import { getDb, inTransaction } from '../../db/client';
++import { syncProductSearch } from '../../db/search';
++import { accountFields, requireRole, requireSession, sameOriginWrite, type Account } from '../auth/session';
++
++export const adminRouter = Router();
++adminRouter.use((_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
++adminRouter.use(requireSession, requireRole('admin'), sameOriginWrite);
++
++class AdminError extends Error {
++  constructor(readonly status: number, message: string) { super(message); }
++}
++
++function handle(fn: (req: Request, res: Response) => void): RequestHandler {
++  return (req, res, next) => {
++    try { fn(req, res); }
++    catch (error) {
++      const errno = typeof error === 'object' && error !== null && 'errcode' in error ? error.errcode : undefined;
++      if (error instanceof AdminError) res.status(error.status).json({ error: error.message });
++      else if (error instanceof z.ZodError) res.status(400).json({ error: error.issues[0]?.message ?? 'Invalid input.' });
++      else if (errno === 2067 || errno === 1555) res.status(409).json({ error: 'That name, slug, or SKU is already in use.' });
++      else if (errno === 787) res.status(400).json({ error: 'The selected category, brand, or product does not exist.' });
++      else next(error);
++    }
++  };
++}
++
++const idSchema = z.coerce.number().int().positive();
++const pageSchema = idSchema.max(100_000).default(1);
++const pageSize = 25;
++const slugSchema = z.string().trim().max(150).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Use lowercase letters, numbers and hyphens for the slug.');
++const activeSchema = z.boolean();
++const shortText = (max: number) => z.string().trim().max(max);
++const imagePath = z.string().trim().max(1000).refine(
++  value => /^https:\/\//i.test(value) || /^\/(?![\/\\])/.test(value),
++  'Image must be an HTTPS URL or a local /path.'
++);
++function toSlug(name: string): string {
++  return name.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 140).replace(/^-+|-+$/g, '') || randomUUID();
++}
++
++const categoryInput = createCategorySchema.extend({
++  name: shortText(150).min(1),
++  slug: slugSchema.optional(),
++  description: shortText(4000).optional(),
++  image: imagePath.optional(),
++});
++const brandInput = createBrandSchema.extend({
++  name: shortText(100).min(1), slug: slugSchema.optional(), logo: imagePath.optional(),
++});
++const productInput = createProductSchema.extend({
++  name: shortText(300).min(1),
++  brandId: idSchema.nullable().optional(),
++  description: shortText(4000).optional(),
++  hsnCode: shortText(32).optional(),
++  slug: slugSchema.optional(),
++  isActive: activeSchema.default(true),
++  imageUrl: imagePath.nullable().optional(),
++});
++const productUpdate = productInput.extend({
++  gstRate: productInput.shape.gstRate.removeDefault(),
++  unit: productInput.shape.unit.removeDefault(),
++  isHeavy: productInput.shape.isHeavy.removeDefault(),
++  isActive: activeSchema,
++}).partial();
++const attributesInput = z.record(shortText(40).min(1), shortText(100).min(1))
++  .refine(attributes => Object.keys(attributes).length <= 30, 'Use at most 30 variant attributes.');
++const variantInput = createVariantSchema.omit({ productId: true }).extend({
++  sku: shortText(50).min(1),
++  designCode: shortText(80).nullable().optional(),
++  optionLabel: shortText(150).nullable().optional(),
++  mrp: z.number().int().positive().nullable().optional(),
++  weightGrams: z.number().int().positive().nullable().optional(),
++  attributes: attributesInput.optional(),
++  isActive: activeSchema.default(true),
++});
++
++const variantUpdate = variantInput.extend({
++  stock: variantInput.shape.stock.removeDefault(),
++  moq: variantInput.shape.moq.removeDefault(),
++  isActive: activeSchema,
++}).partial();
++
++const productFields = `p.id, p.name, p.slug, p.description, p.category_id AS categoryId, p.brand_id AS brandId,
++  p.hsn_code AS hsnCode, p.gst_rate AS gstRate, p.unit, p.is_heavy AS isHeavy, p.is_active AS isActive,
++  (SELECT path FROM product_images WHERE product_id = p.id AND variant_id IS NULL ORDER BY sort_order, id LIMIT 1) AS imageUrl`;
++const variantFields = `id, product_id AS productId, sku, design_code AS designCode, option_label AS optionLabel,
++  price, mrp, stock, weight_grams AS weightGrams, moq, is_active AS isActive`;
++
++adminRouter.get('/dashboard', handle((_req, res) => {
++  res.json(getDb().prepare(`SELECT
++    (SELECT COUNT(*) FROM products WHERE is_active = 1) AS activeProducts,
++    (SELECT COUNT(*) FROM categories WHERE is_active = 1) AS categories,
++    (SELECT COUNT(*) FROM contact_enquiries) AS enquiries,
++    (SELECT COUNT(*) FROM users WHERE is_active = 1) AS activeUsers`).get());
++}));
++
++adminRouter.get('/categories', handle((_req, res) => {
++  res.json(getDb().prepare('SELECT id, name, slug, parent_id AS parentId, is_active AS isActive FROM categories ORDER BY name, id').all());
++}));
++adminRouter.post('/categories', handle((req, res) => {
++  const input = categoryInput.parse(req.body);
++  const row = getDb().prepare(`
++    INSERT INTO categories (name, slug, parent_id, description, image, sort_order, is_active)
++    VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id, name, slug
++  `).get(input.name, input.slug ?? toSlug(input.name), input.parentId ?? null, input.description ?? null, input.image ?? null, input.sortOrder, Number(input.isActive));
++  res.status(201).json(row);
++}));
++
++adminRouter.get('/brands', handle((_req, res) => {
++  res.json(getDb().prepare('SELECT id, name, slug FROM brands ORDER BY name, id').all());
++}));
++adminRouter.post('/brands', handle((req, res) => {
++  const input = brandInput.parse(req.body);
++  res.status(201).json(getDb().prepare('INSERT INTO brands (name, slug, logo) VALUES (?, ?, ?) RETURNING id, name, slug')
++    .get(input.name, input.slug ?? toSlug(input.name), input.logo ?? null));
++}));
++
++adminRouter.get('/products', handle((req, res) => {
++  const page = pageSchema.parse(req.query.page);
++  const db = getDb();
++  const data = db.prepare(`SELECT ${productFields} FROM products p ORDER BY p.id DESC LIMIT ? OFFSET ?`)
++    .all(pageSize, (page - 1) * pageSize);
++  res.json({ data, page, total: db.prepare('SELECT COUNT(*) AS total FROM products').get()?.total, limit: pageSize });
++}));
++
++adminRouter.get('/products/:id', handle((req, res) => {
++  const id = idSchema.parse(req.params.id);
++  const db = getDb();
++  const product = db.prepare(`SELECT ${productFields} FROM products p WHERE p.id = ?`).get(id);
++  if (!product) throw new AdminError(404, 'Product not found.');
++  const attributes = db.prepare('SELECT key, value FROM variant_attributes WHERE variant_id = ? ORDER BY key');
++  const variants = db.prepare(`SELECT ${variantFields} FROM product_variants WHERE product_id = ? ORDER BY id`).all(id)
++    .map(variant => ({ ...variant, attributes: Object.fromEntries(attributes.all(Number(variant.id)).map(row => [row.key, row.value])) }));
++  res.json({ ...product, variants });
++}));
++
++function saveImage(productId: number, imageUrl?: string | null) {
++  if (imageUrl === undefined) return;
++  const db = getDb();
++  const first = db.prepare(`SELECT id FROM product_images WHERE product_id = ? AND variant_id IS NULL ORDER BY sort_order, id LIMIT 1`).get(productId);
++  if (first) {
++    if (imageUrl) db.prepare('UPDATE product_images SET path = ? WHERE id = ?').run(imageUrl, Number(first.id));
++    else db.prepare('DELETE FROM product_images WHERE id = ?').run(Number(first.id));
++  } else if (imageUrl) {
++    db.prepare('INSERT INTO product_images (product_id, path) VALUES (?, ?)').run(productId, imageUrl);
++  }
++}
++
++adminRouter.post('/products', handle((req, res) => {
++  const input = productInput.parse(req.body);
++  const db = getDb();
++  const id = inTransaction(db, () => {
++    const created = Number(db.prepare(`
++      INSERT INTO products (name, slug, category_id, brand_id, description, hsn_code, gst_rate, unit, is_heavy, is_active)
++      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
++    `).run(input.name, input.slug ?? toSlug(input.name), input.categoryId, input.brandId ?? null, input.description ?? null,
++      input.hsnCode ?? null, input.gstRate, input.unit, Number(input.isHeavy), Number(input.isActive)).lastInsertRowid);
++    saveImage(created, input.imageUrl);
++    syncProductSearch(db, created);
++    return created;
++  });
++  res.status(201).json({ id });
++}));
++
++adminRouter.put('/products/:id', handle((req, res) => {
++  const id = idSchema.parse(req.params.id);
++  const input = productUpdate.parse(req.body);
++  const db = getDb();
++  inTransaction(db, () => {
++    const current = db.prepare(`SELECT ${productFields} FROM products p WHERE p.id = ?`).get(id);
++    if (!current) throw new AdminError(404, 'Product not found.');
++    db.prepare(`
++      UPDATE products SET name = ?, slug = ?, category_id = ?, brand_id = ?, description = ?, hsn_code = ?,
++        gst_rate = ?, unit = ?, is_heavy = ?, is_active = ?, updated_at = datetime('now') WHERE id = ?
++    `).run(input.name ?? current.name, input.slug ?? current.slug, input.categoryId ?? current.categoryId,
++      input.brandId === undefined ? current.brandId : input.brandId, input.description ?? current.description,
++      input.hsnCode ?? current.hsnCode, input.gstRate ?? current.gstRate, input.unit ?? current.unit,
++      Number(input.isHeavy ?? current.isHeavy), Number(input.isActive ?? current.isActive), id);
++    saveImage(id, input.imageUrl);
++    syncProductSearch(db, id);
++  });
++  res.json({ id });
++}));
++
++adminRouter.delete('/products/:id', handle((req, res) => {
++  const id = idSchema.parse(req.params.id);
++  const db = getDb();
++  inTransaction(db, () => {
++    const { changes } = db.prepare("UPDATE products SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(id);
++    if (!changes) throw new AdminError(404, 'Product not found.');
++    syncProductSearch(db, id);
++  });
++  res.sendStatus(204);
++}));
++
++function saveAttributes(variantId: number, attributes: Record<string, string>) {
++  const db = getDb();
++  db.prepare('DELETE FROM variant_attributes WHERE variant_id = ?').run(variantId);
++  const insert = db.prepare('INSERT INTO variant_attributes (variant_id, key, value) VALUES (?, ?, ?)');
++  for (const [key, value] of Object.entries(attributes)) insert.run(variantId, key, value);
++}
++
++adminRouter.post('/products/:id/variants', handle((req, res) => {
++  const productId = idSchema.parse(req.params.id);
++  const input = variantInput.parse(req.body);
++  const db = getDb();
++  const id = inTransaction(db, () => {
++    const created = Number(db.prepare(`
++      INSERT INTO product_variants (product_id, sku, design_code, option_label, price, mrp, stock, weight_grams, moq, is_active)
++      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
++    `).run(productId, input.sku, input.designCode ?? null, input.optionLabel ?? null, input.price, input.mrp ?? null,
++      input.stock, input.weightGrams ?? null, input.moq, Number(input.isActive)).lastInsertRowid);
++    saveAttributes(created, input.attributes ?? {});
++    syncProductSearch(db, productId);
++    return created;
++  });
++  res.status(201).json({ id });
++}));
++
++adminRouter.patch('/variants/:id', handle((req, res) => {
++  const id = idSchema.parse(req.params.id);
++  const input = variantUpdate.parse(req.body);
++  const db = getDb();
++  const variant = inTransaction(db, () => {
++    const current = db.prepare(`SELECT ${variantFields} FROM product_variants WHERE id = ?`).get(id);
++    if (!current) throw new AdminError(404, 'Variant not found.');
++    const updated = db.prepare(`
++      UPDATE product_variants SET sku = ?, design_code = ?, option_label = ?, price = ?, mrp = ?,
++        stock = ?, weight_grams = ?, moq = ?, is_active = ? WHERE id = ? RETURNING ${variantFields}
++    `).get(input.sku ?? current.sku, input.designCode === undefined ? current.designCode : input.designCode,
++      input.optionLabel === undefined ? current.optionLabel : input.optionLabel, input.price ?? current.price,
++      input.mrp === undefined ? current.mrp : input.mrp, input.stock ?? current.stock,
++      input.weightGrams === undefined ? current.weightGrams : input.weightGrams, input.moq ?? current.moq,
++      Number(input.isActive ?? current.isActive), id);
++    if (input.attributes) saveAttributes(id, input.attributes);
++    syncProductSearch(db, Number(current.productId));
++    return updated;
++  });
++  res.json(variant);
++}));
++
++adminRouter.get('/enquiries', handle((req, res) => {
++  const page = pageSchema.parse(req.query.page);
++  const db = getDb();
++  const data = db.prepare(`SELECT reference, name, phone, email, subject, message, items_json AS itemsJson, created_at AS createdAt
++    FROM contact_enquiries ORDER BY created_at DESC, reference DESC LIMIT ? OFFSET ?`).all(pageSize, (page - 1) * pageSize);
++  res.json({ data, page, total: db.prepare('SELECT COUNT(*) AS total FROM contact_enquiries').get()?.total, limit: pageSize });
++}));
++
++adminRouter.get('/users', handle((req, res) => {
++  const page = pageSchema.parse(req.query.page);
++  const db = getDb();
++  const data = db.prepare(`SELECT ${accountFields} FROM users ORDER BY id DESC LIMIT ? OFFSET ?`)
++    .all(pageSize, (page - 1) * pageSize).map(row => ({ ...row, isActive: Boolean(row.isActive) }));
++  res.json({ data, page, total: db.prepare('SELECT COUNT(*) AS total FROM users').get()?.total, limit: pageSize });
++}));
++
++adminRouter.patch('/users/:id', handle((req, res) => {
++  const id = idSchema.parse(req.params.id);
++  const input = z.object({ role: z.enum(['customer', 'dealer', 'admin']), isActive: activeSchema }).parse(req.body);
++  if (id === (res.locals.user as Account).id) throw new AdminError(409, 'You cannot change your own role or account status.');
++  const db = getDb();
++  inTransaction(db, () => {
++    const { changes } = db.prepare('UPDATE users SET role = ?, is_active = ? WHERE id = ?')
++      .run(input.role, Number(input.isActive), id);
++    if (!changes) throw new AdminError(404, 'User not found.');
++    db.prepare('DELETE FROM auth_sessions WHERE user_id = ?').run(id);
++  });
++  res.json({ id, ...input });
++}));
++
++adminRouter.get('/settings', handle((_req, res) => {
++  res.json(Object.fromEntries(getDb().prepare('SELECT key, value FROM settings').all().map(row => [row.key, row.value])));
++}));
++adminRouter.put('/settings', handle((req, res) => {
++  const input = z.record(z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,79}$/), shortText(2000)).parse(req.body);
++  const db = getDb();
++  inTransaction(db, () => {
++    const put = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
++    for (const [key, value] of Object.entries(input)) if (value !== undefined) put.run(key, value);
++  });
++  res.json(input);
++}));
+diff --git a/apps/api/src/modules/auth/auth.router.ts b/apps/api/src/modules/auth/auth.router.ts
+new file mode 100644
+index 0000000..013e352
+--- /dev/null
++++ b/apps/api/src/modules/auth/auth.router.ts
+@@ -0,0 +1,96 @@
++import { Router } from 'express';
++import { rateLimit } from 'express-rate-limit';
++import { loginSchema, registerSchema } from '@lammart/shared';
++import { getDb } from '../../db/client';
++import { hashPassword, verifyPassword } from './passwords';
++import { accountFields, requireSession, sameOriginWrite, startSession, endSession, type Account } from './session';
++
++export const authRouter = Router();
++authRouter.use(['/auth', '/me'], (_req, res, next) => {
++  res.set('Cache-Control', 'no-store');
++  next();
++});
++
++const attempts = rateLimit({
++  windowMs: 15 * 60_000,
++  limit: 30,
++  skipSuccessfulRequests: true,
++  standardHeaders: 'draft-7',
++  legacyHeaders: false,
++  validate: { xForwardedForHeader: false },
++  message: { error: 'Too many attempts. Try again later.' },
++});
++const registrationLimit = rateLimit({
++  windowMs: 15 * 60_000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false,
++  validate: { xForwardedForHeader: false }, message: { error: 'Too many requests. Try again later.' },
++});
++
++authRouter.post('/auth/register', sameOriginWrite, registrationLimit, async (req, res, next) => {
++  const parsed = registerSchema.safeParse(req.body);
++  if (!parsed.success) {
++    res.status(400).json({ error: 'Enter a name, valid Indian mobile number, and a password of 8–128 characters.' });
++    return;
++  }
++  const { name, email, phone, password } = parsed.data;
++  const normalizedEmail = email?.toLowerCase() ?? null;
++  try {
++    const hash = await hashPassword(password);
++    const db = getDb();
++    const row = db.prepare(`
++      INSERT INTO users (name, email, phone, password_hash, role)
++      SELECT ?, ?, ?, ?, 'customer'
++      WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = ? COLLATE NOCASE OR phone = ?)
++      ON CONFLICT DO NOTHING
++      RETURNING ${accountFields}
++    `).get(name.trim(), normalizedEmail, phone, hash, normalizedEmail, phone);
++    if (!row) {
++      res.status(409).json({ error: 'An account with these details already exists.' });
++      return;
++    }
++    startSession(req, res, Number(row.id));
++    res.status(201).json({ user: { ...row, isActive: true } });
++  } catch (error) { next(error); }
++});
++
++authRouter.post('/auth/login', sameOriginWrite, attempts, async (req, res, next) => {
++  const parsed = loginSchema.safeParse(req.body);
++  if (!parsed.success) {
++    res.status(400).json({ error: 'Enter your email or phone and password.' });
++    return;
++  }
++  const { emailOrPhone, password } = parsed.data;
++  try {
++    const db = getDb();
++    const accounts = db.prepare(`
++      SELECT ${accountFields}, password_hash FROM users
++      WHERE (email = ? COLLATE NOCASE OR phone = ?) AND is_active = 1 LIMIT 2
++    `).all(emailOrPhone, emailOrPhone) as unknown as (Account & { password_hash: string })[];
++    const account = accounts.length === 1 ? accounts[0] : undefined;
++    const valid = await verifyPassword(password, account?.password_hash);
++    // Older demo databases must not grant admin access with the published fixture password.
++    if (!account || !valid || (account.role === 'admin' && password === 'Admin@12345')) {
++      res.status(401).json({ error: 'Invalid credentials.' });
++      return;
++    }
++    const { password_hash: storedHash, ...user } = account;
++    const upgrade = storedHash.startsWith('$2') ? await hashPassword(password) : null;
++    if (upgrade) {
++      db.prepare('UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ? AND is_active = 1')
++        .run(upgrade, user.id, storedHash);
++    }
++    const current = db.prepare(`SELECT ${accountFields} FROM users WHERE id = ? AND password_hash = ? AND is_active = 1`)
++      .get(user.id, upgrade ?? storedHash);
++    if (!current || (current.role === 'admin' && password === 'Admin@12345')) {
++      res.status(401).json({ error: 'Invalid credentials.' });
++      return;
++    }
++    startSession(req, res, user.id);
++    res.json({ user: { ...current, isActive: true } });
++  } catch (error) { next(error); }
++});
++
++authRouter.get('/me', requireSession, (_req, res) => res.json({ user: res.locals.user }));
++authRouter.post('/auth/logout', sameOriginWrite, (req, res) => {
++  endSession(req, res);
++  res.json({ success: true });
++});
+diff --git a/apps/api/src/modules/auth/create-admin.ts b/apps/api/src/modules/auth/create-admin.ts
+new file mode 100644
+index 0000000..567c95e
+--- /dev/null
++++ b/apps/api/src/modules/auth/create-admin.ts
+@@ -0,0 +1,45 @@
++import { z } from 'zod';
++import { config } from '../../config';
++import { getDb, closeDb, inTransaction } from '../../db/client';
++import { runMigrations } from '../../db/migrate';
++import { hashPassword } from './passwords';
++
++const credentials = z.object({
++  name: z.string().trim().min(2).max(100),
++  email: z.string().trim().email().max(254).toLowerCase(),
++  password: z.string().min(12).max(128),
++});
++
++async function main() {
++  if (config.isProduction && !process.env.DB_PATH) throw new Error('Set DB_PATH to the API database.');
++  const input = credentials.safeParse({
++    name: process.env.ADMIN_NAME || 'Administrator',
++    email: process.env.ADMIN_EMAIL,
++    password: process.env.ADMIN_PASSWORD,
++  });
++  if (!input.success) throw new Error('Set ADMIN_EMAIL and ADMIN_PASSWORD (12–128 characters).');
++  const { name, email, password } = input.data;
++  const hash = await hashPassword(password);
++  const db = getDb();
++  runMigrations(db);
++  inTransaction(db, () => {
++    const existing = db.prepare('SELECT id, role FROM users WHERE email = ? COLLATE NOCASE LIMIT 2').all(email);
++    if (existing.length) {
++      if (existing.length !== 1 || existing[0].role !== 'admin' || !process.argv.includes('--reset-password')) {
++        throw new Error('That email already exists. Use --reset-password only for an existing administrator.');
++      }
++      const id = Number(existing[0].id);
++      db.prepare('UPDATE users SET password_hash = ?, is_active = 1 WHERE id = ?').run(hash, id);
++      db.prepare('DELETE FROM auth_sessions WHERE user_id = ?').run(id);
++    } else {
++      db.prepare("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'admin')")
++        .run(name, email, hash);
++    }
++  });
++  console.log('Administrator credentials saved.');
++}
++
++main().catch((error: unknown) => {
++  console.error(error instanceof Error ? error.message : 'Could not save administrator credentials.');
++  process.exitCode = 1;
++}).finally(closeDb);
+diff --git a/apps/api/src/modules/auth/passwords.ts b/apps/api/src/modules/auth/passwords.ts
+new file mode 100644
+index 0000000..15f4112
+--- /dev/null
++++ b/apps/api/src/modules/auth/passwords.ts
+@@ -0,0 +1,26 @@
++import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
++import bcrypt from 'bcrypt';
++
++const parameters = { N: 32_768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
++
++function derive(password: string, salt: Buffer): Promise<Buffer> {
++  return new Promise((resolve, reject) => {
++    scrypt(password, salt, 64, parameters, (error, hash) => error ? reject(error) : resolve(hash));
++  });
++}
++
++export async function hashPassword(password: string): Promise<string> {
++  const salt = randomBytes(16);
++  return `scrypt$${salt.toString('hex')}$${(await derive(password, salt)).toString('hex')}`;
++}
++
++export async function verifyPassword(password: string, encoded?: string): Promise<boolean> {
++  // Existing databases may contain bcrypt hashes. Rehash them on successful sign-in.
++  if (encoded?.startsWith('$2') && Buffer.byteLength(password) <= 72) {
++    return bcrypt.compare(password, encoded);
++  }
++
++  const match = /^scrypt\$([a-f0-9]{32})\$([a-f0-9]{128})$/.exec(encoded ?? '');
++  const actual = await derive(password, match ? Buffer.from(match[1], 'hex') : Buffer.alloc(16));
++  return !!match && timingSafeEqual(actual, Buffer.from(match[2], 'hex'));
++}
+diff --git a/apps/api/src/modules/auth/session.ts b/apps/api/src/modules/auth/session.ts
+new file mode 100644
+index 0000000..fabe413
+--- /dev/null
++++ b/apps/api/src/modules/auth/session.ts
+@@ -0,0 +1,85 @@
++import { createHash, randomBytes } from 'node:crypto';
++import type { CookieOptions, Request, RequestHandler, Response } from 'express';
++import type { User } from '@lammart/shared';
++import { config } from '../../config';
++import { getDb, inTransaction } from '../../db/client';
++
++const sessionLifetime = 8 * 60 * 60 * 1000;
++const cookieName = 'auth_token';
++const cookieOptions: CookieOptions = {
++  httpOnly: true,
++  secure: config.isProduction,
++  sameSite: 'strict',
++  path: '/',
++};
++
++export type Account = Pick<User, 'id' | 'name' | 'email' | 'phone' | 'role' | 'isActive'>;
++
++export const accountFields = 'id, name, email, phone, role, is_active AS isActive';
++
++function digest(token: string): string {
++  return createHash('sha256').update(token).digest('hex');
++}
++
++function cookieToken(req: Request): string | undefined {
++  const match = /(?:^|;\s*)auth_token=([A-Za-z0-9_-]{43})(?=;|$)/.exec(req.get('Cookie') ?? '');
++  return match?.[1];
++}
++
++export function startSession(req: Request, res: Response, userId: number): void {
++  const token = randomBytes(32).toString('base64url');
++  const now = Date.now();
++  const old = cookieToken(req);
++  const db = getDb();
++  inTransaction(db, () => {
++    db.prepare('DELETE FROM auth_sessions WHERE expires_at <= ?').run(now);
++    if (old) db.prepare('DELETE FROM auth_sessions WHERE token_hash = ?').run(digest(old));
++    db.prepare('INSERT INTO auth_sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
++      .run(digest(token), userId, now + sessionLifetime);
++  });
++  res.cookie(cookieName, token, { ...cookieOptions, maxAge: sessionLifetime });
++}
++
++export function endSession(req: Request, res: Response): void {
++  const token = cookieToken(req);
++  if (token) getDb().prepare('DELETE FROM auth_sessions WHERE token_hash = ?').run(digest(token));
++  res.clearCookie(cookieName, cookieOptions);
++}
++
++export const requireSession: RequestHandler = (req, res, next) => {
++  const token = cookieToken(req);
++  const row = token && getDb().prepare(`
++    SELECT u.id, u.name, u.email, u.phone, u.role, u.is_active AS isActive
++    FROM auth_sessions s JOIN users u ON u.id = s.user_id
++    WHERE s.token_hash = ? AND s.expires_at > ? AND u.is_active = 1
++  `).get(digest(token), Date.now());
++  if (!row) {
++    res.status(401).json({ error: 'Sign in to continue.' });
++    return;
++  }
++  res.locals.user = { ...row, isActive: true } as Account;
++  next();
++};
++
++export function requireRole(...roles: Account['role'][]): RequestHandler {
++  return (_req, res, next) => {
++    const user = res.locals.user as Account | undefined;
++    if (!user) res.status(401).json({ error: 'Sign in to continue.' });
++    else if (!roles.includes(user.role)) res.status(403).json({ error: 'You do not have access to this area.' });
++    else next();
++  };
++}
++
++// Browser writes must come from the storefront. CLI requests without Origin remain supported.
++export const sameOriginWrite: RequestHandler = (req, res, next) => {
++  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
++  const origin = req.get('Origin');
++  const fetchSite = req.get('Sec-Fetch-Site');
++  const allowedOrigin = (process.env.SITE_URL || process.env.CORS_ORIGIN)?.replace(/\/+$/, '');
++  if ((fetchSite && !['same-origin', 'none'].includes(fetchSite)) ||
++      (origin && fetchSite !== 'same-origin' && origin !== allowedOrigin)) {
++    res.status(403).json({ error: 'Cross-site requests are not allowed.' });
++    return;
++  }
++  next();
++};
+diff --git a/apps/api/tests/admin.test.ts b/apps/api/tests/admin.test.ts
+new file mode 100644
+index 0000000..8e65714
+--- /dev/null
++++ b/apps/api/tests/admin.test.ts
+@@ -0,0 +1,110 @@
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import request from 'supertest';
++import { app } from '../src/app';
++import { closeDb, getDb } from '../src/db/client';
++import { runMigrations } from '../src/db/migrate';
++import { hashPassword } from '../src/modules/auth/passwords';
++
++const password = 'Local testing only! 926';
++const adminEmail = 'operator@example.test';
++const customerInput = { name: 'Local customer', email: 'customer@example.test', phone: '9876543210', password };
++const login = (emailOrPhone: string) => ({ emailOrPhone, password });
++let admin: ReturnType<typeof request.agent>;
++let customer: ReturnType<typeof request.agent>;
++let dealer: ReturnType<typeof request.agent>;
++
++describe('Authentication and administration', () => {
++  beforeEach(async () => {
++    admin = request.agent(app);
++    customer = request.agent(app);
++    dealer = request.agent(app);
++    process.env.DB_PATH = ':memory:';
++    const db = getDb({ forceNew: true });
++    runMigrations(db);
++    const insert = db.prepare('INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)');
++    const hashed = await hashPassword(password);
++    insert.run('Operator', adminEmail, hashed, 'admin');
++    insert.run('Dealer', 'dealer@example.test', hashed, 'dealer');
++  });
++
++  afterEach(() => {
++    closeDb();
++    delete process.env.DB_PATH;
++  });
++
++  it('keeps admin routes private and registration assigns the customer role', async () => {
++    expect((await request(app).get('/api/v1/admin/dashboard')).status).toBe(401);
++    const result = await customer.post('/api/v1/auth/register').send({ ...customerInput, role: 'admin', isActive: false });
++    expect(result.status).toBe(201);
++    expect(result.body.user).toMatchObject({ role: 'customer', isActive: true });
++    expect(result.body.user).not.toHaveProperty('password_hash');
++    expect(result.get('Set-Cookie')?.[0]).toMatch(/HttpOnly; SameSite=Strict/);
++    expect((await customer.get('/api/v1/me')).body.user.email).toBe(customerInput.email);
++    expect((await customer.get('/api/v1/admin/dashboard')).status).toBe(403);
++    expect((await customer.post('/api/v1/admin/categories').send({ name: 'Restricted category' })).status).toBe(403);
++    expect((await dealer.post('/api/v1/auth/login').send(login('dealer@example.test'))).status).toBe(200);
++    expect((await dealer.get('/api/v1/admin/enquiries')).status).toBe(403);
++  });
++
++  it('authenticates admins and revokes sessions on logout', async () => {
++    const bad = await request(app).post('/api/v1/auth/login').send({ ...login(adminEmail), password: 'incorrect' });
++    expect(bad.status).toBe(401);
++    const session = request.agent(app);
++    const ok = await session.post('/api/v1/auth/login').send(login(adminEmail.toUpperCase()));
++    expect(ok.status).toBe(200);
++    const cookie = ok.get('Set-Cookie')![0].split(';')[0];
++    expect((await session.get('/api/v1/admin/dashboard')).status).toBe(200);
++    expect((await session.post('/api/v1/auth/logout')).status).toBe(200);
++    expect((await session.get('/api/v1/me')).status).toBe(401);
++    expect((await request(app).get('/api/v1/me').set('Cookie', cookie)).status).toBe(401);
++  });
++
++  it('lets an admin publish catalog data, edit variant stock and remove an archived product from search', async () => {
++    expect((await admin.post('/api/v1/auth/login').send(login(adminEmail))).status).toBe(200);
++    const category = await admin.post('/api/v1/admin/categories').send({ name: 'Laminates' });
++    const brand = await admin.post('/api/v1/admin/brands').send({ name: 'Local Brand' });
++    expect(category.status).toBe(201);
++    expect(brand.status).toBe(201);
++    const product = await admin.post('/api/v1/admin/products').send({
++      categoryId: category.body.id, brandId: brand.body.id, name: 'Walnut Sheet', unit: 'sheet', gstRate: 12,
++    });
++    expect(product.status).toBe(201);
++    const variant = await admin.post(`/api/v1/admin/products/${product.body.id}/variants`).send({
++      sku: 'WALNUT-1', price: 123400, stock: 20, moq: 2, attributes: { thickness: '1 mm', finish: 'matte' },
++    });
++    expect(variant.status).toBe(201);
++    const result = await request(app).get('/api/v1/products').query({ q: 'Walnut', thickness: '1 mm' });
++    expect(result.body.data).toHaveLength(1);
++    const facets = await request(app).get('/api/v1/filters').query({ category: 'laminates' });
++    expect(facets.body.thickness).toContainEqual({ value: '1 mm', count: 1 });
++    expect(facets.body.brand).toContainEqual({ value: 'Local Brand', slug: 'local-brand', count: 1 });
++    const changed = await admin.patch(`/api/v1/admin/variants/${variant.body.id}`).send({ price: 190000 });
++    expect(changed.body).toMatchObject({ price: 190000, stock: 20, moq: 2 });
++    expect((await admin.put(`/api/v1/admin/products/${product.body.id}`).send({ name: 'Walnut Panel' })).status).toBe(200);
++    const detail = await admin.get(`/api/v1/admin/products/${product.body.id}`);
++    expect(detail.body).toMatchObject({ name: 'Walnut Panel', gstRate: 12, unit: 'sheet' });
++    expect((await admin.delete(`/api/v1/admin/products/${product.body.id}`)).status).toBe(204);
++    expect((await request(app).get('/api/v1/products/walnut-sheet')).status).toBe(404);
++    expect((await request(app).get('/api/v1/products').query({ q: 'Walnut' })).body.data).toHaveLength(0);
++  });
++
++  it('exposes enquiries only to admins and applies role changes to subsequent sessions', async () => {
++    expect((await admin.post('/api/v1/auth/login').send(login(adminEmail))).status).toBe(200);
++    const enquiry = await request(app).post('/api/v1/contact').send({
++      name: 'Local enquiry', phone: customerInput.phone, subject: 'Samples', message: 'Walnut sample request.',
++    });
++    expect(enquiry.status).toBe(201);
++    const inbox = await admin.get('/api/v1/admin/enquiries');
++    expect(inbox.body.data[0].reference).toBe(enquiry.body.reference);
++    const { user } = (await customer.post('/api/v1/auth/register').send(customerInput)).body;
++    const own = (await admin.get('/api/v1/me')).body.user;
++    expect((await admin.patch(`/api/v1/admin/users/${own.id}`).send({ role: 'customer', isActive: false })).status).toBe(409);
++    expect((await admin.patch(`/api/v1/admin/users/${user.id}`).send({ role: 'admin', isActive: true })).status).toBe(200);
++    expect((await customer.get('/api/v1/admin/dashboard')).status).toBe(401);
++    expect((await customer.post('/api/v1/auth/login').send(login(customerInput.email))).status).toBe(200);
++    expect((await customer.get('/api/v1/admin/dashboard')).status).toBe(200);
++    expect((await admin.patch(`/api/v1/admin/users/${user.id}`).send({ role: 'dealer', isActive: false })).status).toBe(200);
++    expect((await customer.get('/api/v1/me')).status).toBe(401);
++    expect((await customer.post('/api/v1/auth/login').send(login(customerInput.email))).status).toBe(401);
++  });
++});
+diff --git a/apps/web/app/account/page.tsx b/apps/web/app/account/page.tsx
+new file mode 100644
+index 0000000..8dd8873
+--- /dev/null
++++ b/apps/web/app/account/page.tsx
+@@ -0,0 +1,21 @@
++import Link from 'next/link';
++import { AccountForm, SignOutButton } from '@/components/account/account-form';
++import { getAccount } from '@/lib/server-account';
++
++export const metadata = { title: 'Account', robots: { index: false, follow: false } };
++
++export default async function AccountPage() {
++  const account = await getAccount();
++  return (
++    <div className="mx-auto max-w-lg px-4 py-12">
++      <div className="rounded-2xl border border-[#E7E2D9] bg-white p-6 sm:p-8">
++        <h1 className="mb-5 text-2xl font-bold">{account ? 'Your account' : 'Sign in to Lammart'}</h1>
++        {account ? <div className="space-y-4">
++          <div><p className="font-semibold">{account.name}</p><p className="text-sm text-slate-600">{account.email ?? account.phone}</p><p className="mt-1 text-sm capitalize text-slate-600">{account.role}</p></div>
++          {account.role === 'admin' && <Link href="/admin" className="block font-semibold text-[#0B7A55] underline">Open admin panel</Link>}
++          <SignOutButton />
++        </div> : <AccountForm />}
++      </div>
++    </div>
++  );
++}
+diff --git a/apps/web/app/admin/page.tsx b/apps/web/app/admin/page.tsx
+new file mode 100644
+index 0000000..9223dee
+--- /dev/null
++++ b/apps/web/app/admin/page.tsx
+@@ -0,0 +1,24 @@
++import Link from 'next/link';
++import { AccountForm, SignOutButton } from '@/components/account/account-form';
++import { AdminPanel } from '@/components/admin/admin-panel';
++import { getAccount } from '@/lib/server-account';
++
++export const metadata = { title: 'Administration', robots: { index: false, follow: false } };
++
++export default async function AdminPage() {
++  const account = await getAccount();
++
++  if (account?.role === 'admin') return <AdminPanel account={account} />;
++  return (
++    <div className="mx-auto max-w-lg px-4 py-12">
++      <div className="rounded-2xl border border-[#E7E2D9] bg-white p-6 sm:p-8">
++        <h1 className="mb-5 text-2xl font-bold">{account ? 'Access restricted' : 'Admin sign in'}</h1>
++        {account ? <div className="space-y-4">
++          <p className="text-slate-600">Only administrators can open this area.</p>
++          <Link className="block font-semibold text-[#0B7A55] underline" href="/account">Back to your account</Link>
++          <SignOutButton />
++        </div> : <AccountForm adminOnly />}
++      </div>
++    </div>
++  );
++}
+diff --git a/apps/web/app/robots.ts b/apps/web/app/robots.ts
+index 8c45d47..fea532e 100644
+--- a/apps/web/app/robots.ts
++++ b/apps/web/app/robots.ts
+@@ -4,7 +4,7 @@ export default function robots(): MetadataRoute.Robots {
+   const site = process.env.SITE_URL?.replace(/\/+$/, '');
+   if (!site) return { rules: { userAgent: '*', disallow: '/' } };
+   return {
+-    rules: { userAgent: '*', allow: '/', disallow: ['/cart', '/api/'] },
++    rules: { userAgent: '*', allow: '/', disallow: ['/cart', '/account', '/admin', '/api/'] },
+     sitemap: `${site}/sitemap.xml`,
+   };
+ }
+diff --git a/apps/web/components/account/account-form.tsx b/apps/web/components/account/account-form.tsx
+new file mode 100644
+index 0000000..efbf241
+--- /dev/null
++++ b/apps/web/components/account/account-form.tsx
+@@ -0,0 +1,70 @@
++'use client';
++
++import { useState, type FormEvent } from 'react';
++import { accountRequest, type Account } from '@/lib/account-api';
++
++const inputClass = 'w-full rounded-lg border border-[#D9D3C7] px-3 py-2.5 text-slate-900';
++
++export function AccountForm({ adminOnly = false }: { adminOnly?: boolean }) {
++  const [register, setRegister] = useState(false);
++  const [busy, setBusy] = useState(false);
++  const [error, setError] = useState('');
++
++  async function submit(event: FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++    const fields = Object.fromEntries(new FormData(event.currentTarget));
++    if (fields.email === '') delete fields.email;
++    setBusy(true);
++    setError('');
++    try {
++      const { user } = await accountRequest<{ user: Account }>(register ? '/auth/register' : '/auth/login', {
++        method: 'POST', body: JSON.stringify(fields),
++      });
++      window.location.replace(user.role === 'admin' && adminOnly ? '/admin' : '/account');
++    } catch (cause) {
++      setError(cause instanceof Error ? cause.message : 'Could not sign in. Try again.');
++      setBusy(false);
++    }
++  }
++
++  return (
++    <div>
++      <form className="space-y-4" onSubmit={submit}>
++        {register ? <>
++          <label className="block text-sm font-medium">Name<input autoComplete="name" name="name" className={inputClass} required minLength={2} maxLength={100} /></label>
++          <label className="block text-sm font-medium">Email (optional)<input autoComplete="email" name="email" type="email" className={inputClass} maxLength={254} /></label>
++          <label className="block text-sm font-medium">Indian mobile number<input autoComplete="tel-national" name="phone" type="tel" pattern="[6-9][0-9]{9}" className={inputClass} required /></label>
++        </> : <label className="block text-sm font-medium">Email or phone<input autoComplete="username" name="emailOrPhone" className={inputClass} required maxLength={254} /></label>}
++        <label className="block text-sm font-medium">Password<input autoComplete={register ? 'new-password' : 'current-password'} name="password" type="password" minLength={register ? 8 : undefined} maxLength={128} className={inputClass} required /></label>
++        {error && <p className="text-sm text-red-700" role="alert">{error}</p>}
++        <button disabled={busy} className="w-full rounded-lg bg-[#0B7A55] px-4 py-2.5 font-semibold text-white disabled:opacity-60">
++          {busy ? 'Please wait…' : register ? 'Create account' : 'Sign in'}
++        </button>
++      </form>
++      {!adminOnly && <button type="button" disabled={busy} className="mt-4 text-sm font-semibold text-[#0B7A55] underline" onClick={() => { setRegister(!register); setError(''); }}>
++        {register ? 'Already have an account? Sign in' : 'Create a customer account'}
++      </button>}
++    </div>
++  );
++}
++
++export function SignOutButton() {
++  const [busy, setBusy] = useState(false);
++  const [error, setError] = useState('');
++  return (
++    <div>
++      <button type="button" disabled={busy} className="rounded-lg border border-[#D9D3C7] px-3 py-2 text-sm font-semibold disabled:opacity-60" onClick={async () => {
++        setBusy(true);
++        setError('');
++        try {
++          await accountRequest('/auth/logout', { method: 'POST' });
++          window.location.replace('/account');
++        } catch {
++          setError('Could not sign out. Try again.');
++          setBusy(false);
++        }
++      }}>Sign out</button>
++      {error && <p className="mt-2 text-sm text-red-700" role="alert">{error}</p>}
++    </div>
++  );
++}
+diff --git a/apps/web/components/admin/admin-panel.tsx b/apps/web/components/admin/admin-panel.tsx
+new file mode 100644
+index 0000000..1655542
+--- /dev/null
++++ b/apps/web/components/admin/admin-panel.tsx
+@@ -0,0 +1,355 @@
++'use client';
++
++import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
++import { AccountRequestError, accountRequest, type Account } from '@/lib/account-api';
++import { SignOutButton } from '@/components/account/account-form';
++
++const tabs = ['Overview', 'Catalog', 'Enquiries', 'Users'] as const;
++const button = 'rounded-lg bg-[#0B7A55] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60';
++const outline = 'rounded-lg border border-[#D9D3C7] px-3 py-2 text-sm font-semibold disabled:opacity-50';
++const control = 'mt-1 w-full rounded-lg border border-[#D9D3C7] bg-white px-3 py-2 text-sm';
++const panel = 'rounded-2xl border border-[#E7E2D9] bg-white p-4 sm:p-6';
++const grid = 'grid gap-3 sm:grid-cols-2';
++const roles = ['customer', 'dealer', 'admin'] as const;
++
++type ListPage<T> = { data: T[]; page: number; total: number; limit: number };
++type Taxonomy = { id: number; name: string; slug: string; parentId?: number | null; isActive?: number };
++type Product = {
++  id: number; name: string; slug: string; categoryId: number; brandId: number | null;
++  description: string | null; hsnCode: string | null; gstRate: number; unit: string;
++  isHeavy: number; isActive: number; imageUrl: string | null;
++};
++type Variant = {
++  id: number; sku: string; designCode: string | null; optionLabel: string | null; price: number;
++  stock: number; moq: number; isActive: number; attributes: Record<string, string>;
++};
++type Enquiry = { reference: string; name: string; phone: string; email: string | null; subject: string; message: string; itemsJson: string; createdAt: string };
++
++function handleFailure(cause: unknown): string {
++  if (cause instanceof AccountRequestError && [401, 403].includes(cause.status)) window.location.replace('/admin');
++  return cause instanceof Error ? cause.message : 'Something went wrong.';
++}
++
++function useAdminResource<T>(path: string, revision = 0) {
++  const key = `${path}:${revision}`;
++  const [result, setResult] = useState<{ key: string; data?: T; error?: string }>();
++  useEffect(() => {
++    const abort = new AbortController();
++    accountRequest<T>(`/admin${path}`, { signal: abort.signal })
++      .then(data => { if (!abort.signal.aborted) setResult({ key, data }); })
++      .catch(cause => { if (!abort.signal.aborted) setResult({ key, error: handleFailure(cause) }); });
++    return () => abort.abort();
++  }, [key, path]);
++  return result?.key === key ? result : {};
++}
++
++async function write(path: string, method: string, body?: unknown) {
++  return accountRequest(`/admin${path}`, {
++    method, body: body === undefined ? undefined : JSON.stringify(body),
++  });
++}
++
++function ResourceState({ error }: { error?: string }) {
++  return <p className={error ? 'text-sm text-red-700' : 'text-sm text-slate-600'} role={error ? 'alert' : 'status'}>{error ?? 'Loading…'}</p>;
++}
++
++function Pager({ page, limit, total, change }: { page: number; limit: number; total: number; change: (page: number) => void }) {
++  if (total <= limit) return null;
++  return (
++    <div className="flex flex-wrap items-center gap-3 text-sm">
++      <button className={outline} disabled={page === 1} onClick={() => change(page - 1)}>Previous</button>
++      <span>Page {page} of {Math.ceil(total / limit)}</span>
++      <button className={outline} disabled={page * limit >= total} onClick={() => change(page + 1)}>Next</button>
++    </div>
++  );
++}
++
++function Field({ label, children }: { label: string; children: ReactNode }) {
++  return <label className="block text-sm font-medium">{label}{children}</label>;
++}
++
++function Editor({ children, label, save, resetOnSuccess = false }: {
++  children: ReactNode; label: string; save: (fields: FormData) => Promise<void>; resetOnSuccess?: boolean;
++}) {
++  const [busy, setBusy] = useState(false);
++  const [message, setMessage] = useState<{ error?: string; saved?: boolean }>({});
++  async function submit(event: FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++    setBusy(true);
++    setMessage({});
++    try {
++      const form = event.currentTarget;
++      await save(new FormData(form));
++      if (resetOnSuccess) form.reset();
++      setMessage({ saved: true });
++    } catch (cause) {
++      setMessage({ error: handleFailure(cause) });
++    } finally {
++      setBusy(false);
++    }
++  }
++  return (
++    <form className="space-y-3" onSubmit={submit}>
++      <fieldset disabled={busy} className="space-y-3">{children}</fieldset>
++      <div className="flex flex-wrap items-center gap-3">
++        <button className={button} disabled={busy}>{busy ? 'Saving…' : label}</button>
++        {message.error && <p role="alert" className="text-sm text-red-700">{message.error}</p>}
++        {message.saved && <p role="status" className="text-sm text-green-800">Saved.</p>}
++      </div>
++    </form>
++  );
++}
++
++const value = (fields: FormData, key: string) => String(fields.get(key) ?? '').trim();
++
++function Overview() {
++  const { data, error } = useAdminResource<{ activeProducts: number; categories: number; enquiries: number; activeUsers: number }>('/dashboard');
++  if (!data) return <ResourceState error={error} />;
++  const metrics = [
++    ['Active products', data.activeProducts], ['Categories', data.categories],
++    ['Enquiries', data.enquiries], ['Active accounts', data.activeUsers],
++  ] as const;
++  return <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{metrics.map(([label, count]) => (
++    <div key={label} className={panel}><p className="text-sm text-slate-600">{label}</p><p className="mt-2 text-3xl font-bold">{count}</p></div>
++  ))}</div>;
++}
++
++function ProductEditor({ product, categories, brands, save }: {
++  product?: Product; categories: Taxonomy[]; brands: Taxonomy[];
++  save: (data: Record<string, unknown>) => Promise<void>;
++}) {
++  const selectableCategories = categories.filter(category => category.isActive === 1 || category.id === product?.categoryId);
++  return (
++    <Editor label={product ? 'Save product' : 'Create product'} save={async data => {
++      const imageUrl = value(data, 'imageUrl');
++      const payload = {
++        name: value(data, 'name'), ...(value(data, 'slug') && { slug: value(data, 'slug') }),
++        categoryId: Number(value(data, 'categoryId')), brandId: Number(value(data, 'brandId')) || null,
++        description: value(data, 'description'), hsnCode: value(data, 'hsnCode'),
++        gstRate: Number(value(data, 'gstRate')), unit: value(data, 'unit'),
++        isHeavy: data.has('isHeavy'), isActive: data.has('isActive'),
++        ...(imageUrl !== (product?.imageUrl ?? '') && { imageUrl: imageUrl || null }),
++      };
++      await save(payload);
++    }}>
++      <div className={grid}>
++        <Field label="Product name"><input name="name" className={control} required maxLength={300} defaultValue={product?.name} /></Field>
++        <Field label="URL slug"><input name="slug" className={control} placeholder="Generated from the name" maxLength={150} defaultValue={product?.slug} /></Field>
++        <Field label="Category"><select name="categoryId" className={control} required defaultValue={product?.categoryId ?? ''}>
++          <option value="" disabled>Select a category</option>{selectableCategories.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
++        </select></Field>
++        <Field label="Brand"><select name="brandId" className={control} defaultValue={product?.brandId ?? ''}>
++          <option value="">No brand</option>{brands.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
++        </select></Field>
++        <Field label="Unit"><select name="unit" className={control} defaultValue={product?.unit ?? 'sheet'}>
++          {['sheet', 'sqft', 'piece', 'set'].map(unit => <option key={unit}>{unit}</option>)}
++        </select></Field>
++        <Field label="GST rate (%)"><input name="gstRate" type="number" min={0} max={100} step="0.01" className={control} required defaultValue={product?.gstRate ?? 18} /></Field>
++        <Field label="HSN code"><input name="hsnCode" className={control} maxLength={32} defaultValue={product?.hsnCode ?? ''} /></Field>
++        <Field label="Cover image URL or path"><input name="imageUrl" className={control} maxLength={1000} defaultValue={product?.imageUrl ?? ''} /></Field>
++      </div>
++      <Field label="Description"><textarea name="description" className={control} rows={3} maxLength={4000} defaultValue={product?.description ?? ''} /></Field>
++      <div className="flex flex-wrap gap-4 text-sm">
++        <label><input type="checkbox" name="isActive" defaultChecked={Boolean(product?.isActive ?? true)} /> Listed in storefront</label>
++        <label><input type="checkbox" name="isHeavy" defaultChecked={Boolean(product?.isHeavy)} /> Heavy item</label>
++      </div>
++    </Editor>
++  );
++}
++
++function VariantEditor({ variant, save }: { variant?: Variant; save: (data: Record<string, unknown>) => Promise<void> }) {
++  return <Editor label={variant ? 'Save variant' : 'Add variant'} save={async fields => {
++    const attributes = { ...variant?.attributes };
++    for (const key of ['thickness', 'finish']) {
++      const entry = value(fields, key);
++      if (entry) attributes[key] = entry;
++      else delete attributes[key];
++    }
++    await save({
++      sku: value(fields, 'sku'), designCode: value(fields, 'designCode') || null, optionLabel: value(fields, 'optionLabel') || null,
++      price: Math.round(Number(value(fields, 'price')) * 100), stock: Number(value(fields, 'stock')),
++      moq: Number(value(fields, 'moq')), isActive: fields.has('isActive'), attributes,
++    });
++  }}>
++    <div className={grid}>
++      <Field label="SKU"><input name="sku" className={control} required maxLength={50} defaultValue={variant?.sku} /></Field>
++      <Field label="Design code"><input name="designCode" className={control} maxLength={80} defaultValue={variant?.designCode ?? ''} /></Field>
++      <Field label="Option label"><input name="optionLabel" className={control} maxLength={150} defaultValue={variant?.optionLabel ?? ''} /></Field>
++      <Field label="Price (₹, including GST)"><input name="price" type="number" min="0.01" step="0.01" className={control} required defaultValue={variant ? variant.price / 100 : undefined} /></Field>
++      <Field label="Stock"><input name="stock" type="number" min={0} step={1} className={control} required defaultValue={variant?.stock ?? 0} /></Field>
++      <Field label="Minimum order quantity"><input name="moq" type="number" min={1} step={1} className={control} required defaultValue={variant?.moq ?? 1} /></Field>
++      <Field label="Thickness"><input name="thickness" className={control} maxLength={100} defaultValue={variant?.attributes.thickness} /></Field>
++      <Field label="Finish"><input name="finish" className={control} maxLength={100} defaultValue={variant?.attributes.finish} /></Field>
++    </div>
++    <label className="block text-sm"><input type="checkbox" name="isActive" defaultChecked={Boolean(variant?.isActive ?? true)} /> Active variant</label>
++  </Editor>;
++}
++
++function ProductDetail({ id, categories, brands, refreshCatalog }: {
++  id: number; categories: Taxonomy[]; brands: Taxonomy[]; refreshCatalog: () => void;
++}) {
++  const [revision, setRevision] = useState(0);
++  const { data, error } = useAdminResource<Product & { variants: Variant[] }>(`/products/${id}`, revision);
++  if (!data) return <ResourceState error={error} />;
++  return (
++    <section className={panel}>
++      <h2 className="mb-4 text-lg font-bold">Edit {data.name}</h2>
++      <ProductEditor product={data} categories={categories} brands={brands} save={async payload => {
++        await write(`/products/${id}`, 'PUT', payload);
++        refreshCatalog();
++      }} />
++      <div className="mt-6 space-y-3 border-t border-[#E7E2D9] pt-5">
++        <h3 className="font-bold">Variants</h3>
++        {data.variants.length === 0 && <p className="text-sm text-slate-600">Add a variant with a price, stock, and attributes to let shoppers find it and add it to a quote.</p>}
++        {data.variants.map(variant => (
++          <details className={panel} key={variant.id}>
++            <summary className="cursor-pointer font-semibold">{variant.sku} · {variant.stock} in stock{variant.isActive ? '' : ' · Inactive'}</summary>
++            <div className="mt-4"><VariantEditor variant={variant} save={async payload => {
++              await write(`/variants/${variant.id}`, 'PATCH', payload);
++              setRevision(previous => previous + 1);
++            }} /></div>
++          </details>
++        ))}
++        <details className={panel}>
++          <summary className="cursor-pointer font-semibold">Add a variant</summary>
++          <div className="mt-4"><VariantEditor save={async payload => {
++            await write(`/products/${id}/variants`, 'POST', payload);
++            setRevision(previous => previous + 1);
++          }} /></div>
++        </details>
++      </div>
++    </section>
++  );
++}
++
++function Catalog() {
++  const [page, setPage] = useState(1);
++  const [revision, setRevision] = useState(0);
++  const [taxonomyRevision, setTaxonomyRevision] = useState(0);
++  const [selected, setSelected] = useState<number | null>(null);
++  const refresh = () => setRevision(previous => previous + 1);
++  const categories = useAdminResource<Taxonomy[]>('/categories', taxonomyRevision);
++  const brands = useAdminResource<Taxonomy[]>('/brands', taxonomyRevision);
++  const products = useAdminResource<ListPage<Product>>(`/products?page=${page}`, revision);
++  const taxonomyError = categories.error ?? brands.error;
++  return <div className="space-y-5">
++    <div className={grid}>
++      <section className={panel}>
++        <h2 className="mb-3 font-bold">Categories</h2>
++        {categories.data ? <Editor label="Add category" save={async data => {
++          await write('/categories', 'POST', { name: value(data, 'name'), parentId: Number(value(data, 'parentId')) || null });
++          setTaxonomyRevision(previous => previous + 1);
++        }}>
++          <Field label="Category name"><input name="name" className={control} required maxLength={150} /></Field>
++          <Field label="Parent category"><select name="parentId" className={control}>
++            <option value="">None</option>{categories.data.filter(row => row.isActive).map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
++          </select></Field>
++        </Editor> : <ResourceState error={taxonomyError} />}
++        {!!categories.data?.length && <p className="mt-3 text-sm text-slate-600">{categories.data.map(row => row.name).join(', ')}</p>}
++      </section>
++      <section className={panel}>
++        <h2 className="mb-3 font-bold">Brands</h2>
++        <Editor label="Add brand" resetOnSuccess save={async data => {
++          await write('/brands', 'POST', { name: value(data, 'name') });
++          setTaxonomyRevision(previous => previous + 1);
++        }}>
++          <Field label="Brand name"><input name="name" className={control} required maxLength={100} /></Field>
++        </Editor>
++        {brands.error && <ResourceState error={brands.error} />}
++        {!!brands.data?.length && <p className="mt-3 text-sm text-slate-600">{brands.data.map(row => row.name).join(', ')}</p>}
++      </section>
++    </div>
++    {categories.data && brands.data && (
++      selected !== null ? (
++        <div className="space-y-3">
++          <button className={outline} onClick={() => setSelected(null)}>Back to product list</button>
++          <ProductDetail key={selected} id={selected} categories={categories.data} brands={brands.data} refreshCatalog={refresh} />
++        </div>
++      ) : <section className={panel}>
++        <h2 className="mb-3 font-bold">New product</h2>
++        {categories.data.some(row => row.isActive) ? <ProductEditor categories={categories.data} brands={brands.data} save={async payload => {
++          const { id } = await accountRequest<{ id: number }>('/admin/products', { method: 'POST', body: JSON.stringify(payload) });
++          setSelected(id);
++          setPage(1);
++          refresh();
++        }} /> : <p className="text-sm text-slate-600">Add a category before creating a product.</p>}
++      </section>
++    )}
++    {selected === null && <section className={panel}>
++      <h2 className="mb-3 font-bold">Products</h2>
++      {products.data ? <div className="space-y-3">
++        {products.data.data.length ? <ul className="divide-y divide-[#E7E2D9]">{products.data.data.map(product => (
++          <li className="flex flex-wrap items-center justify-between gap-2 py-3" key={product.id}>
++            <div><p className="font-semibold">{product.name}</p><p className="text-sm text-slate-600">{product.isActive ? 'Listed' : 'Hidden'}</p></div>
++            <button className={outline} onClick={() => setSelected(product.id)}>Edit {product.name}</button>
++          </li>
++        ))}</ul> : <p className="text-sm text-slate-600">No products yet.</p>}
++        <Pager {...products.data} change={setPage} />
++      </div> : <ResourceState error={products.error} />}
++    </section>}
++  </div>;
++}
++
++function Enquiries() {
++  const [page, setPage] = useState(1);
++  const { data, error } = useAdminResource<ListPage<Enquiry>>(`/enquiries?page=${page}`);
++  if (!data) return <ResourceState error={error} />;
++  return <div className="space-y-3">
++    {data.data.length === 0 && <p className={panel}>No enquiries received.</p>}
++    {data.data.map(entry => {
++      let items: { sku: string; quantity: number }[] = [];
++      try { items = JSON.parse(entry.itemsJson); } catch { /* Older records may lack items. */ }
++      return <details className={panel} key={entry.reference}>
++        <summary className="cursor-pointer font-semibold">{entry.subject} · {entry.name}</summary>
++        <div className="mt-3 space-y-2 text-sm">
++          <p className="break-all text-slate-600">{entry.createdAt} UTC · {entry.reference}</p>
++          <p>{entry.phone}{entry.email && ` · ${entry.email}`}</p>
++          <p className="whitespace-pre-wrap break-words">{entry.message}</p>
++          {!!items?.length && <ul className="list-inside list-disc">{items.map((item, index) => <li key={index}>{item.sku}: {item.quantity}</li>)}</ul>}
++        </div>
++      </details>;
++    })}
++    <Pager {...data} change={setPage} />
++  </div>;
++}
++
++function Users({ currentId }: { currentId: number }) {
++  const [page, setPage] = useState(1);
++  const { data, error } = useAdminResource<ListPage<Account>>(`/users?page=${page}`);
++  if (!data) return <ResourceState error={error} />;
++  return <div className="space-y-3">
++    {data.data.map(user => <section key={user.id} className={panel}>
++      <h2 className="font-bold">{user.name}{user.id === currentId ? ' (you)' : ''}</h2>
++      <p className="mb-3 break-all text-sm text-slate-600">{user.email ?? user.phone}</p>
++      {user.id === currentId ? <p className="text-sm text-slate-600">Administrator</p> :
++        <Editor label="Save access" save={async fields => {
++          await write(`/users/${user.id}`, 'PATCH', { role: value(fields, 'role'), isActive: fields.has('isActive') });
++        }}>
++          <div className="flex flex-wrap items-end gap-4">
++            <Field label="Role"><select className={control} name="role" defaultValue={user.role}>{roles.map(role => <option key={role}>{role}</option>)}</select></Field>
++            <label className="pb-2 text-sm"><input name="isActive" type="checkbox" defaultChecked={user.isActive} /> Active account</label>
++          </div>
++        </Editor>}
++    </section>)}
++    <Pager {...data} change={setPage} />
++  </div>;
++}
++
++export function AdminPanel({ account }: { account: Account }) {
++  const [tab, setTab] = useState<(typeof tabs)[number]>('Overview');
++  return (
++    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-8">
++      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
++        <div><h1 className="text-2xl font-bold">Admin panel</h1><p className="text-sm text-slate-600">Signed in as {account.name}</p></div>
++        <SignOutButton />
++      </div>
++      <nav aria-label="Admin sections" className="mb-5 flex flex-wrap gap-2">
++        {tabs.map(section => <button key={section} type="button" aria-pressed={tab === section} className={tab === section ? button : outline} onClick={() => setTab(section)}>{section}</button>)}
++      </nav>
++      {tab === 'Overview' && <Overview />}
++      {tab === 'Catalog' && <Catalog />}
++      {tab === 'Enquiries' && <Enquiries />}
++      {tab === 'Users' && <Users currentId={account.id} />}
++    </div>
++  );
++}
+diff --git a/apps/web/components/layout/header.tsx b/apps/web/components/layout/header.tsx
+index b3c9397..0812fe6 100644
+--- a/apps/web/components/layout/header.tsx
++++ b/apps/web/components/layout/header.tsx
+@@ -7,6 +7,7 @@ const links = [
+   { href: '/samples', label: 'Samples' },
+   { href: '/quote', label: 'Project quotes' },
+   { href: '/contact', label: 'Contact' },
++  { href: '/account', label: 'Account' },
+ ];
+ 
+ export function Header() {
+diff --git a/apps/web/lib/account-api.ts b/apps/web/lib/account-api.ts
+new file mode 100644
+index 0000000..3253985
+--- /dev/null
++++ b/apps/web/lib/account-api.ts
+@@ -0,0 +1,21 @@
++import type { User } from '@lammart/shared';
++
++export type Account = Pick<User, 'id' | 'name' | 'email' | 'phone' | 'role' | 'isActive'>;
++
++export class AccountRequestError extends Error {
++  constructor(readonly status: number, message: string) { super(message); }
++}
++
++export async function accountRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
++  const response = await fetch(`/api/v1${path}`, {
++    ...init,
++    cache: 'no-store',
++    headers: { 'Content-Type': 'application/json' },
++  });
++  if (response.status === 204) return undefined as T;
++  const payload = await response.json().catch(() => null);
++  if (!response.ok) {
++    throw new AccountRequestError(response.status, payload?.error ?? 'Unable to complete the request.');
++  }
++  return payload as T;
++}
+diff --git a/apps/web/lib/server-account.ts b/apps/web/lib/server-account.ts
+new file mode 100644
+index 0000000..a706ca8
+--- /dev/null
++++ b/apps/web/lib/server-account.ts
+@@ -0,0 +1,16 @@
++import { cookies } from 'next/headers';
++import type { Account } from './account-api';
++
++export async function getAccount(): Promise<Account | null> {
++  const token = (await cookies()).get('auth_token')?.value;
++  if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
++  const origin = (process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000')
++    .replace(/\/+$/, '').replace(/\/api\/v1$/, '');
++  const response = await fetch(`${origin}/api/v1/me`, {
++    headers: { Cookie: `auth_token=${token}` }, cache: 'no-store', signal: AbortSignal.timeout(5000),
++  });
++  if (response.status === 401) return null;
++  if (!response.ok) throw new Error('Account service unavailable.');
++  const payload = await response.json() as { user: Account };
++  return payload.user;
++}
+diff --git a/package-lock.json b/package-lock.json
+index 8e4fcd4..df7af5e 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -27,6 +27,7 @@
+       "version": "1.0.0",
+       "dependencies": {
+         "@lammart/shared": "*",
++        "bcrypt": "^6.0.0",
+         "cors": "^2.8.5",
+         "dotenv": "^16.4.5",
+         "express": "^4.21.1",
+@@ -46,7 +47,6 @@
+         "@types/node": "^22.8.0",
+         "@types/pdfkit": "^0.13.5",
+         "@types/supertest": "^6.0.2",
+-        "bcrypt": "^6.0.0",
+         "rimraf": "^6.0.1",
+         "supertest": "^7.0.0",
+         "tsx": "^4.19.2",
+@@ -3748,7 +3748,6 @@
+       "version": "6.0.0",
+       "resolved": "https://registry.npmjs.org/bcrypt/-/bcrypt-6.0.0.tgz",
+       "integrity": "sha512-cU8v/EGSrnH+HnxV2z0J7/blxH8gq7Xh2JFT6Aroax7UohdmiJJlxApMxtKfuI7z68NvvVcmR78k2LbT6efhRg==",
+-      "dev": true,
+       "hasInstallScript": true,
+       "license": "MIT",
+       "dependencies": {
+@@ -7309,7 +7308,6 @@
+       "version": "8.9.2",
+       "resolved": "https://registry.npmjs.org/node-addon-api/-/node-addon-api-8.9.2.tgz",
+       "integrity": "sha512-VijLXbi3UACN69I0JVXJsX4tjACjNoQDgv2gTF6sx2wWEi8tkSg2eX8p5gSIFi8z2+DL3oHmY6OyKce38SDolg==",
+-      "dev": true,
+       "license": "MIT",
+       "engines": {
+         "node": "^18 || ^20 || >= 21"
+@@ -7338,7 +7336,6 @@
+       "version": "4.8.4",
+       "resolved": "https://registry.npmjs.org/node-gyp-build/-/node-gyp-build-4.8.4.tgz",
+       "integrity": "sha512-LA4ZjwlnUblHVgq0oBF3Jl/6h/Nvs5fzBLwdEF4nuxnFdsfajde4WfxtJr3CaiH+F6ewcIB/q4jQ4UzPyid+CQ==",
+-      "dev": true,
+       "license": "MIT",
+       "bin": {
+         "node-gyp-build": "bin.js",
+diff --git a/package.json b/package.json
+index b31c915..3cf2719 100644
+--- a/package.json
++++ b/package.json
+@@ -23,7 +23,8 @@
+     "dev:web": "npm -w apps/web run dev",
+     "migrate": "npm -w apps/api run migrate",
+     "start:api": "npm -w apps/api run start",
+-    "start:web": "npm -w apps/web run start"
++    "start:web": "npm -w apps/web run start",
++    "admin:create": "npm -w apps/api run admin:create --"
+   },
+   "devDependencies": {
+     "concurrently": "^9.1.0",
+diff --git a/packages/shared/src/schemas/auth.ts b/packages/shared/src/schemas/auth.ts
+index 78285ee..1f5374b 100644
+--- a/packages/shared/src/schemas/auth.ts
++++ b/packages/shared/src/schemas/auth.ts
+@@ -1,16 +1,16 @@
+ import { z } from 'zod';
+ 
+ export const registerSchema = z.object({
+-  name: z.string().min(2).max(100),
+-  email: z.string().email().optional(),
++  name: z.string().trim().min(2).max(100),
++  email: z.string().trim().email().max(254).optional(),
+   phone: z.string().regex(/^[6-9]\d{9}$/, 'Invalid Indian phone number'),
+   password: z.string().min(8).max(128),
+ });
+ export type RegisterInput = z.infer<typeof registerSchema>;
+ 
+ export const loginSchema = z.object({
+-  emailOrPhone: z.string().min(1),
+-  password: z.string().min(1),
++  emailOrPhone: z.string().trim().min(1).max(254),
++  password: z.string().min(1).max(128),
+ });
+ export type LoginInput = z.infer<typeof loginSchema>;
+ 

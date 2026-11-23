@@ -1,290 +1,627 @@
 'use client';
 
-import * as React from 'react';
-import Link from 'next/link';
-import { toast } from 'sonner';
+import { useState, useEffect, useRef } from 'react';
+import {
+  Search, Plus, Trash2, Printer, Check, ArrowRight,
+  Truck, UserCheck, ShieldAlert, FileSpreadsheet, Package,
+  Layers, MapPin, Building2
+} from 'lucide-react';
+import { apiRequest } from '@/lib/api';
+import { formatINR } from '@/lib/formatters';
+import PrintModal from '@/components/PrintModal';
 
-export default function HomePage() {
-  const [selectedThickness, setSelectedThickness] = React.useState('1.0 mm');
-  const [selectedBrands, setSelectedBrands] = React.useState<string[]>(['Greenlam']);
-  const [quoteItems, setQuoteItems] = React.useState<string[]>([]);
-  const [swatchItems, setSwatchItems] = React.useState<string[]>([]);
+interface Variant {
+  id: string;
+  brand: string;
+  category: string;
+  designCode: string;
+  designName: string;
+  finish: string;
+  thicknessMm: number;
+  size: string;
+  unit: string;
+  defaultSellingPrice: number;
+  stockLedgers: { location: 'Showroom' | 'Godown'; quantityOnHand: number }[];
+}
 
-  const brands = [
-    { name: 'Greenlam', count: 5 },
-    { name: 'CenturyPly', count: 5 },
-    { name: 'Merino', count: 4 },
-    { name: 'Royale Touche', count: 4 },
-    { name: 'Godrej', count: 3 },
-    { name: 'Dorset', count: 3 },
-  ];
+interface Party {
+  id: string;
+  name: string;
+  phone: string;
+  partyType: string;
+  defaultCommissionPercent?: number;
+}
 
-  const thicknesses = ['0.8 mm', '1.0 mm', '1.25 mm', '1.5 mm', '6 mm', '18 mm'];
+interface CartItem {
+  variant: Variant;
+  quantity: number;
+  rate: number;
+  discountPercent: number;
+}
 
-  const products = [
-    {
-      id: '1',
-      code: '#7011',
-      thickness: '1.0 mm',
-      brand: 'MERINO',
-      name: 'Walnut Grain',
-      price: '₹1,450',
-      swatchStyle:
-        'repeating-linear-gradient(90deg, #5a3b26 0 6px, #6b4630 6px 11px, #4e3220 11px 15px)',
-      slug: 'merino-walnut-grain-7011',
-    },
-    {
-      id: '2',
-      code: '#6020',
-      thickness: '1.0 mm',
-      brand: 'GREENLAM',
-      name: 'Sage Matte',
-      price: '₹1,280',
-      swatchStyle: 'linear-gradient(135deg, #7a9985, #5a7a67)',
-      slug: 'greenlam-sage-matte-6020',
-    },
-    {
-      id: '3',
-      code: '#5042',
-      thickness: '1.0 mm',
-      brand: 'ROYALE TOUCHE',
-      name: 'Calacatta Marble',
-      price: '₹2,100',
-      swatchStyle:
-        'linear-gradient(120deg, #ecebe7, #d3d1c9 40%, #f3f2ee 60%, #c9c7bf)',
-      slug: 'royale-touche-calacatta-marble-5042',
-    },
-    {
-      id: '4',
-      code: '#4108',
-      thickness: '1.0 mm',
-      brand: 'GODREJ',
-      name: 'Natural Oak',
-      price: '₹1,650',
-      swatchStyle:
-        'repeating-linear-gradient(90deg, #d9b98b 0 7px, #cfae7e 7px 12px, #e0c298 12px 18px)',
-      slug: 'godrej-natural-oak-4108',
-    },
-    {
-      id: '5',
-      code: '#1000',
-      thickness: '1.0 mm',
-      brand: 'CENTURYPLY',
-      name: 'Charcoal Suede',
-      price: '₹1,390',
-      swatchStyle: 'linear-gradient(160deg, #30353a, #1b1e21)',
-      slug: 'centuryply-charcoal-suede-1000',
-    },
-    {
-      id: '6',
-      code: '#3217',
-      thickness: '1.0 mm',
-      brand: 'DORSET',
-      name: 'Terracotta Linen',
-      price: '₹1,520',
-      swatchStyle: 'linear-gradient(135deg, #bd6a44, #a2522f)',
-      slug: 'dorset-terracotta-linen-3217',
-    },
-  ];
+export default function CounterBillingPage() {
+  // Document mode
+  const [docType, setDocType] = useState<'Delivery_Challan' | 'Tax_Invoice' | 'Estimate'>('Delivery_Challan');
+  const [dispatchFrom, setDispatchFrom] = useState<'Showroom' | 'Godown'>('Godown');
+  const [transportDetails, setTransportDetails] = useState('');
+  const [notes, setNotes] = useState('');
 
-  const handleToggleBrand = (brandName: string) => {
-    setSelectedBrands((prev) =>
-      prev.includes(brandName)
-        ? prev.filter((b) => b !== brandName)
-        : [...prev, brandName]
-    );
-  };
+  // Parties
+  const [customers, setCustomers] = useState<Party[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
+  const [referrers, setReferrers] = useState<Party[]>([]);
+  const [selectedReferrerId, setSelectedReferrerId] = useState<string>('');
 
-  const handleAddSwatch = (code: string, name: string) => {
-    if (swatchItems.includes(code)) {
-      toast.info(`${name} swatch is already in your sample box`);
+  // Search & Variant selection
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Variant[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [selectedVariant, setSelectedVariant] = useState<Variant | null>(null);
+
+  // Line item inputs
+  const [itemQty, setItemQty] = useState<number>(1);
+  const [itemRate, setItemRate] = useState<number>(0);
+  const [itemDiscount, setItemDiscount] = useState<number>(0);
+
+  // Cart
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
+
+  // Created Transaction for Print Modal
+  const [createdTransaction, setCreatedTransaction] = useState<any>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const qtyInputRef = useRef<HTMLInputElement>(null);
+
+  // Load Customers & Referrers on mount
+  useEffect(() => {
+    async function loadParties() {
+      try {
+        const custRes = await apiRequest('/parties?type=Retail_Customer');
+        const contRes = await apiRequest('/parties?type=Contractor');
+        const carpRes = await apiRequest('/parties?type=Carpenter');
+        const archRes = await apiRequest('/parties?type=Architect_Designer');
+
+        const allCust = [...(custRes.data || []), ...(contRes.data || [])];
+        const allRef = [...(carpRes.data || []), ...(archRes.data || [])];
+
+        setCustomers(allCust);
+        if (allCust.length > 0) setSelectedCustomerId(allCust[0].id);
+
+        setReferrers(allRef);
+      } catch (err: any) {
+        console.error('Failed to load parties:', err);
+      }
+    }
+    loadParties();
+  }, []);
+
+  // Quick Autocomplete Search
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
       return;
     }
-    if (swatchItems.length >= 5) {
-      toast.error('Maximum 5 free swatches per sample request');
-      return;
-    }
-    setSwatchItems((prev) => [...prev, code]);
-    toast.success(`Added ${name} (${code}) to sample swatches (Free)`);
+
+    const timer = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const res = await apiRequest(`/catalog/variants?q=${encodeURIComponent(searchQuery)}&limit=10`);
+        setSearchResults(res.data || []);
+      } catch (err) {
+        console.error('Search failed:', err);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // When a variant is picked from search
+  const handleSelectVariant = (v: Variant) => {
+    setSelectedVariant(v);
+    setItemRate(Number(v.defaultSellingPrice));
+    setItemQty(1);
+    setItemDiscount(0);
+    setSearchQuery('');
+    setSearchResults([]);
+    setTimeout(() => qtyInputRef.current?.focus(), 50);
   };
 
-  const handleAddQuote = (code: string, name: string) => {
-    setQuoteItems((prev) => [...prev, code]);
-    toast.success(`Added ${name} (${code}) to B2B Quote Cart`);
+  // Add line item
+  const handleAddItem = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!selectedVariant || itemQty <= 0) return;
+
+    setCartItems((prev) => [
+      ...prev,
+      {
+        variant: selectedVariant,
+        quantity: itemQty,
+        rate: itemRate,
+        discountPercent: itemDiscount,
+      },
+    ]);
+
+    setSelectedVariant(null);
+    setItemQty(1);
+    setItemRate(0);
+    setItemDiscount(0);
+    searchInputRef.current?.focus();
+  };
+
+  // Remove line item
+  const handleRemoveItem = (index: number) => {
+    setCartItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  // Calculate totals
+  const subtotal = cartItems.reduce((sum, item) => {
+    const gross = item.quantity * item.rate;
+    const discount = gross * (item.discountPercent / 100);
+    return sum + (gross - discount);
+  }, 0);
+
+  const gstRate = 0.18; // 18% standard for laminates
+  const taxAmount = docType === 'Estimate' ? 0 : subtotal * gstRate;
+  const grandTotal = subtotal + taxAmount;
+
+  // Selected Referrer Commission Preview
+  const selectedReferrer = referrers.find((r) => r.id === selectedReferrerId);
+  const commissionPercent = selectedReferrer?.defaultCommissionPercent || 0;
+  const estimatedCommission = (subtotal * commissionPercent) / 100;
+
+  // Submit Transaction (Save & Print)
+  const handleSubmit = async () => {
+    if (!selectedCustomerId) {
+      setErrorMessage('Please select a customer');
+      return;
+    }
+    if (cartItems.length === 0) {
+      setErrorMessage('Add at least one item to the bill');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setErrorMessage(null);
+
+    try {
+      const payload = {
+        transactionType: docType,
+        customerId: selectedCustomerId,
+        referrerId: selectedReferrerId || null,
+        dispatchFrom: docType === 'Estimate' ? null : dispatchFrom,
+        transportDetails: transportDetails || null,
+        notes: notes || null,
+        lineItems: cartItems.map((item) => ({
+          variantId: item.variant.id,
+          quantity: item.quantity,
+          rate: item.rate,
+          discountPercent: item.discountPercent,
+        })),
+      };
+
+      const res = await apiRequest('/transactions', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+
+      setCreatedTransaction(res.data);
+      // Reset form
+      setCartItems([]);
+      setTransportDetails('');
+      setNotes('');
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to create transaction');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
-    <div className="bg-[#FAF8F4] text-[#14201B] min-h-[1400px]">
-      {/* Category Heading & Breadcrumb Bar */}
-      <div className="max-w-[1360px] mx-auto px-4 sm:px-8 pt-8 pb-6">
-        <p className="m-0 mb-3 text-[14px] text-[#5B6660]">
-          <Link href="/" className="hover:text-[#0B7A55]">
-            Home
-          </Link>{' '}
-          /{' '}
-          <b className="text-[#14201B] font-medium">Laminates</b>
-        </p>
-        <div className="flex justify-between items-end gap-4 flex-wrap">
-          <div>
-            <h1 className="font-display m-0 text-3xl sm:text-[44px] leading-[1.1] font-bold text-[#14201B]">
-              Laminates
-            </h1>
-            <p className="m-0 mt-2 text-[17px] text-[#5B6660]">
-              Decorative, liner and premium laminates, ready to quote.
-            </p>
+    <div className="space-y-6">
+      {/* Top Banner: Mode & Settings Switcher */}
+      <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#E7E2D9] flex flex-wrap items-center justify-between gap-4">
+        {/* Document Mode Switcher */}
+        <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl">
+          <button
+            onClick={() => setDocType('Delivery_Challan')}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+              docType === 'Delivery_Challan'
+                ? 'bg-[#0B7A55] text-white shadow'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Delivery Challan
+          </button>
+          <button
+            onClick={() => setDocType('Tax_Invoice')}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+              docType === 'Tax_Invoice'
+                ? 'bg-[#0B7A55] text-white shadow'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            GST Tax Invoice
+          </button>
+          <button
+            onClick={() => setDocType('Estimate')}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+              docType === 'Estimate'
+                ? 'bg-[#0B7A55] text-white shadow'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Quotation / Estimate
+          </button>
+        </div>
+
+        {/* Dispatch Location Selector (for Challan & Invoice) */}
+        {docType !== 'Estimate' && (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-gray-500 font-medium">Dispatch From:</span>
+            <div className="flex rounded-lg overflow-hidden border border-gray-300">
+              <button
+                type="button"
+                onClick={() => setDispatchFrom('Godown')}
+                className={`px-3 py-1.5 text-xs font-semibold ${
+                  dispatchFrom === 'Godown' ? 'bg-emerald-800 text-white' : 'bg-white text-gray-700'
+                }`}
+              >
+                Main Godown
+              </button>
+              <button
+                type="button"
+                onClick={() => setDispatchFrom('Showroom')}
+                className={`px-3 py-1.5 text-xs font-semibold ${
+                  dispatchFrom === 'Showroom' ? 'bg-emerald-800 text-white' : 'bg-white text-gray-700'
+                }`}
+              >
+                Showroom Display
+              </button>
+            </div>
           </div>
-          <p className="m-0 text-[14px] text-[#5B6660]">8 products</p>
+        )}
+
+        {/* Transport Details */}
+        <div className="flex items-center gap-2 text-sm">
+          <Truck className="w-4 h-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Vehicle / Tempo No. (e.g. GJ01AB1234)"
+            value={transportDetails}
+            onChange={(e) => setTransportDetails(e.target.value)}
+            className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs w-56 focus:outline-none focus:border-emerald-600"
+          />
         </div>
       </div>
 
-      {/* Main Grid: Filters Sidebar + Catalog Products Grid */}
-      <div className="max-w-[1360px] mx-auto px-4 sm:px-8 pb-16 grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-8">
-        {/* Left Filter Sidebar */}
-        <aside className="bg-white border border-[#E7E2D9] rounded-[16px] p-5 self-start shadow-xs">
-          <h2 className="font-display m-0 mb-2 text-[18px] font-bold text-[#14201B]">
-            Filters
-          </h2>
-
-          {/* Brand Filter */}
-          <p className="mt-4 mb-2 text-[12px] font-semibold tracking-[0.08em] text-[#5B6660] uppercase">
-            BRAND
-          </p>
-          <div className="flex flex-col">
-            {brands.map((b) => (
-              <label
-                key={b.name}
-                className="flex items-center gap-3 min-h-[44px] text-[15px] text-[#14201B] cursor-pointer hover:text-[#0B7A55] transition-colors"
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedBrands.includes(b.name)}
-                  onChange={() => handleToggleBrand(b.name)}
-                  className="w-[18px] h-[18px] rounded border-[#D9D3C7] text-[#0B7A55] accent-[#0B7A55] cursor-pointer"
-                />
-                <span>{b.name}</span>
-                <span className="ml-auto text-[13px] text-[#5B6660]">{b.count}</span>
-              </label>
-            ))}
-          </div>
-
-          {/* Thickness Chips Filter */}
-          <p className="mt-5 mb-2 text-[12px] font-semibold tracking-[0.08em] text-[#5B6660] uppercase">
-            THICKNESS
-          </p>
-          <div className="flex flex-wrap gap-2 pb-3">
-            {thicknesses.map((th) => {
-              const isSelected = selectedThickness === th;
-              return (
-                <button
-                  key={th}
-                  onClick={() => setSelectedThickness(th)}
-                  className={`chip ${isSelected ? 'chip-active' : ''}`}
-                >
-                  {th}
-                </button>
-              );
-            })}
-          </div>
-        </aside>
-
-        {/* Right Product Grid */}
-        <main>
-          {/* Active Chips & Sort Row */}
-          <div className="flex justify-between items-center gap-4 flex-wrap mb-5">
-            <div className="flex items-center gap-2 flex-wrap">
-              {selectedThickness && (
-                <button
-                  onClick={() => setSelectedThickness('')}
-                  className="chip chip-active"
-                >
-                  {selectedThickness} ×
-                </button>
-              )}
-              {selectedBrands.map((b) => (
-                <button
-                  key={b}
-                  onClick={() => handleToggleBrand(b)}
-                  className="chip chip-active"
-                >
-                  {b} ×
-                </button>
-              ))}
-              <button
-                onClick={() => {
-                  setSelectedThickness('');
-                  setSelectedBrands([]);
-                }}
-                className="chip border-none bg-transparent text-[#5B6660] hover:text-[#14201B]"
-              >
-                Clear all
-              </button>
+      {/* Main Grid: Left = Item Entry & Cart, Right = Customer & Billing Summary */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left Column (2 Cols): Quick Autocomplete & Cart Table */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Quick Search & Fast Entry Bar */}
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-[#E7E2D9] space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-bold text-gray-900 font-['Space_Grotesk'] flex items-center gap-2">
+                <Search className="w-4 h-4 text-[#0B7A55]" />
+                <span>Instant Shade & SKU Search</span>
+              </h2>
+              <span className="text-xs text-gray-500">
+                Type shade code, brand or finish (e.g. <span className="font-mono text-emerald-700 font-semibold">"21094 suede"</span>)
+              </span>
             </div>
 
-            <label className="text-[14px] text-[#5B6660] flex items-center gap-2">
-              Sort
-              <select className="h-[44px] border border-[#D9D3C7] rounded-[10px] px-3 font-inherit text-[14px] bg-white text-[#14201B] focus:outline-none focus:border-[#0B7A55]">
-                <option>Newest arrivals</option>
-                <option>Brand</option>
-                <option>Price: Low to High</option>
-                <option>Price: High to Low</option>
-              </select>
-            </label>
-          </div>
+            {/* Autocomplete Input */}
+            <div className="relative">
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Search Brand + Shade Code + Finish (Press Enter)..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-[#FAF8F4] border border-[#D9D3C7] rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#0B7A55] focus:bg-white text-gray-900 shadow-inner"
+              />
 
-          {/* Cards Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
-            {products.map((p) => (
-              <article key={p.id} className="swatch-card group">
-                {/* Visual Swatch Preview Box */}
-                <div
-                  className="h-[210px] relative transition-transform duration-300"
-                  style={{ background: p.swatchStyle }}
-                >
-                  {/* Top-Left Code Pill */}
-                  <span className="absolute top-3 left-3 bg-white text-[#14201B] text-[12px] font-semibold px-2.5 py-1 rounded-full shadow-xs">
-                    {p.code}
-                  </span>
-                  {/* Top-Right Thickness Pill */}
-                  <span className="absolute top-3 right-3 bg-[rgba(20,32,27,0.72)] text-white text-[12px] font-medium px-2.5 py-1 rounded-full backdrop-blur-xs">
-                    {p.thickness}
-                  </span>
+              {/* Autocomplete Dropdown */}
+              {searchResults.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-30 max-h-72 overflow-y-auto divide-y divide-gray-100">
+                  {searchResults.map((v) => {
+                    const showroomStock = v.stockLedgers?.find((s) => s.location === 'Showroom')?.quantityOnHand || 0;
+                    const godownStock = v.stockLedgers?.find((s) => s.location === 'Godown')?.quantityOnHand || 0;
+
+                    return (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => handleSelectVariant(v)}
+                        className="w-full text-left p-3 hover:bg-emerald-50/60 transition flex items-center justify-between text-sm group"
+                      >
+                        <div>
+                          <div className="font-bold text-gray-900 group-hover:text-emerald-800">
+                            {v.brand} - {v.designCode} ({v.designName})
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            {v.finish} | {v.thicknessMm}mm | {v.size} | {v.category}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-4 text-right">
+                          <div className="text-xs space-y-0.5">
+                            <div className="text-gray-600">
+                              Godown: <span className="font-bold text-gray-900">{godownStock}</span>
+                            </div>
+                            <div className="text-gray-600">
+                              Showroom: <span className="font-bold text-gray-900">{showroomStock}</span>
+                            </div>
+                          </div>
+                          <div className="font-mono font-bold text-emerald-700 text-base">
+                            {formatINR(v.defaultSellingPrice)}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Selected Variant - Fast Keyboard Entry Form */}
+            {selectedVariant && (
+              <form onSubmit={handleAddItem} className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="font-bold text-emerald-950 text-base">
+                    {selectedVariant.brand} {selectedVariant.designCode} — {selectedVariant.designName}
+                  </div>
+                  <div className="text-xs text-emerald-700 font-medium">
+                    {selectedVariant.finish} • {selectedVariant.thicknessMm}mm • {selectedVariant.size}
+                  </div>
                 </div>
 
-                {/* Card Info Content */}
-                <div className="p-4 flex flex-col gap-1 bg-white">
-                  <span className="text-[12px] font-semibold tracking-[0.08em] text-[#5B6660] uppercase">
-                    {p.brand}
-                  </span>
-                  <Link href={`/p/${p.slug}`}>
-                    <h3 className="font-display m-0 text-[19px] font-bold text-[#14201B] hover:text-[#0B7A55] transition-colors">
-                      {p.name}
-                    </h3>
-                  </Link>
-                  <p className="m-0 mt-1 mb-3 text-[14px] text-[#5B6660]">
-                    <span className="font-semibold text-[#14201B]">{p.price}</span> per sheet
-                  </p>
+                <div className="grid grid-cols-4 gap-3 pt-1">
+                  <div>
+                    <label className="text-xs font-semibold text-gray-600 block mb-1">Quantity ({selectedVariant.unit})</label>
+                    <input
+                      ref={qtyInputRef}
+                      type="number"
+                      min="1"
+                      value={itemQty}
+                      onChange={(e) => setItemQty(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm font-bold text-gray-900 focus:outline-none focus:border-emerald-600"
+                    />
+                  </div>
 
-                  {/* Dual Action Buttons from Mockup */}
-                  <div className="flex gap-2">
+                  <div>
+                    <label className="text-xs font-semibold text-gray-600 block mb-1">Selling Rate (₹)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={itemRate}
+                      onChange={(e) => setItemRate(parseFloat(e.target.value) || 0)}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono font-bold text-gray-900 focus:outline-none focus:border-emerald-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-gray-600 block mb-1">Discount %</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={itemDiscount}
+                      onChange={(e) => setItemDiscount(parseFloat(e.target.value) || 0)}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-emerald-600"
+                    />
+                  </div>
+
+                  <div className="flex items-end">
                     <button
-                      onClick={() => handleAddSwatch(p.code, p.name)}
-                      className="btn-b1 flex-1"
+                      type="submit"
+                      className="w-full bg-[#0B7A55] hover:bg-[#086143] text-white font-semibold py-2 px-4 rounded-lg text-sm shadow transition flex items-center justify-center gap-1.5"
                     >
-                      Free swatch
-                    </button>
-                    <button
-                      onClick={() => handleAddQuote(p.code, p.name)}
-                      className="btn-b2 flex-1"
-                    >
-                      Add to quote
+                      <Plus className="w-4 h-4" />
+                      <span>Add to Bill</span>
                     </button>
                   </div>
                 </div>
-              </article>
-            ))}
+              </form>
+            )}
           </div>
-        </main>
+
+          {/* Line Items Table */}
+          <div className="bg-white rounded-2xl shadow-sm border border-[#E7E2D9] overflow-hidden">
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-gray-50/50">
+              <h3 className="font-bold text-gray-900 text-sm font-['Space_Grotesk']">
+                Billed Items ({cartItems.length})
+              </h3>
+              <span className="text-xs text-gray-500">Live Item Ledger</span>
+            </div>
+
+            {cartItems.length === 0 ? (
+              <div className="p-12 text-center text-gray-400">
+                <Package className="w-12 h-12 mx-auto stroke-[1.2] mb-3 text-gray-300" />
+                <p className="font-medium text-sm">No items in the bill yet.</p>
+                <p className="text-xs text-gray-400 mt-1">Use the search box above to add laminates or hardware.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-gray-100/75 text-gray-700 text-xs uppercase font-semibold border-b border-gray-200">
+                    <tr>
+                      <th className="py-3 px-4">#</th>
+                      <th className="py-3 px-4">Brand & Design</th>
+                      <th className="py-3 px-4">Finish / Thickness</th>
+                      <th className="py-3 px-4 text-center">Qty</th>
+                      <th className="py-3 px-4 text-right">Rate</th>
+                      <th className="py-3 px-4 text-right">Disc %</th>
+                      <th className="py-3 px-4 text-right">Total</th>
+                      <th className="py-3 px-4 text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {cartItems.map((item, idx) => {
+                      const lineGross = item.quantity * item.rate;
+                      const lineNet = lineGross - lineGross * (item.discountPercent / 100);
+
+                      return (
+                        <tr key={idx} className="hover:bg-gray-50 transition">
+                          <td className="py-3 px-4 text-gray-400">{idx + 1}</td>
+                          <td className="py-3 px-4 font-bold text-gray-900">
+                            {item.variant.brand} {item.variant.designCode}
+                            <div className="text-xs text-gray-500 font-normal">{item.variant.designName}</div>
+                          </td>
+                          <td className="py-3 px-4 text-gray-600 text-xs">
+                            {item.variant.finish} | {item.variant.thicknessMm}mm
+                          </td>
+                          <td className="py-3 px-4 text-center font-bold text-gray-900">
+                            {item.quantity} {item.variant.unit}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono">{formatINR(item.rate)}</td>
+                          <td className="py-3 px-4 text-right font-mono text-gray-500">
+                            {item.discountPercent > 0 ? `${item.discountPercent}%` : '-'}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono font-bold text-gray-900">
+                            {formatINR(lineNet)}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <button
+                              onClick={() => handleRemoveItem(idx)}
+                              className="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50 transition"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right Column: Customer Selection, Commission & Summary */}
+        <div className="space-y-6">
+          {/* Party & Referrer Card */}
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-[#E7E2D9] space-y-4">
+            <h3 className="font-bold text-gray-900 text-base font-['Space_Grotesk'] flex items-center gap-2">
+              <UserCheck className="w-4 h-4 text-[#0B7A55]" />
+              <span>Customer & Referrer</span>
+            </h3>
+
+            {/* Customer Dropdown */}
+            <div>
+              <label className="text-xs font-semibold text-gray-600 block mb-1">Billed To (Customer / Contractor)</label>
+              <select
+                value={selectedCustomerId}
+                onChange={(e) => setSelectedCustomerId(e.target.value)}
+                className="w-full bg-[#FAF8F4] border border-[#D9D3C7] rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-emerald-600 font-medium"
+              >
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.phone}) — {c.partyType.replace('_', ' ')}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Carpenter / Architect Referrer Dropdown */}
+            <div>
+              <label className="text-xs font-semibold text-gray-600 block mb-1">Tag Carpenter / Architect (Optional)</label>
+              <select
+                value={selectedReferrerId}
+                onChange={(e) => setSelectedReferrerId(e.target.value)}
+                className="w-full bg-[#FAF8F4] border border-[#D9D3C7] rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-emerald-600"
+              >
+                <option value="">No Referrer</option>
+                {referrers.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name} ({r.phone}) — {r.partyType} ({r.defaultCommissionPercent}% comm.)
+                  </option>
+                ))}
+              </select>
+
+              {/* Live Commission Calculation Preview */}
+              {selectedReferrer && subtotal > 0 && (
+                <div className="mt-2 bg-amber-50 border border-amber-200 rounded-lg p-2.5 text-xs text-amber-900 flex justify-between items-center">
+                  <span>Commission ({commissionPercent}%):</span>
+                  <span className="font-mono font-bold text-amber-800">{formatINR(estimatedCommission)}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Bill Notes */}
+            <div>
+              <label className="text-xs font-semibold text-gray-600 block mb-1">Remarks / Site Address</label>
+              <textarea
+                rows={2}
+                placeholder="e.g. Deliver to Villa 42, Bopal site"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="w-full bg-[#FAF8F4] border border-[#D9D3C7] rounded-xl p-2.5 text-xs text-gray-900 focus:outline-none focus:border-emerald-600"
+              />
+            </div>
+          </div>
+
+          {/* Payment & Bill Totals Card */}
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-[#E7E2D9] space-y-4">
+            <h3 className="font-bold text-gray-900 text-base font-['Space_Grotesk']">
+              Summary & Totals
+            </h3>
+
+            <div className="space-y-2 text-sm border-b border-gray-200 pb-4">
+              <div className="flex justify-between text-gray-600">
+                <span>Subtotal (Net Items):</span>
+                <span className="font-mono font-semibold text-gray-900">{formatINR(subtotal)}</span>
+              </div>
+              {docType !== 'Estimate' && (
+                <div className="flex justify-between text-gray-600 text-xs">
+                  <span>GST (CGST 9% + SGST 9%):</span>
+                  <span className="font-mono">{formatINR(taxAmount)}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center pt-2 text-lg font-black text-gray-900">
+                <span>Grand Total:</span>
+                <span className="font-mono text-[#0B7A55] text-xl">{formatINR(grandTotal)}</span>
+              </div>
+            </div>
+
+            {errorMessage && (
+              <div className="bg-red-50 text-red-700 text-xs p-3 rounded-xl border border-red-200 font-medium flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
+            {/* Save & Print Action Button */}
+            <button
+              onClick={handleSubmit}
+              disabled={isSubmitting || cartItems.length === 0}
+              className={`w-full py-3.5 px-6 rounded-xl text-white font-bold text-base shadow-md transition flex items-center justify-center gap-2 ${
+                cartItems.length === 0 || isSubmitting
+                  ? 'bg-gray-400 cursor-not-allowed'
+                  : 'bg-[#0B7A55] hover:bg-[#086143]'
+              }`}
+            >
+              <Printer className="w-5 h-5" />
+              <span>
+                {isSubmitting ? 'Creating...' : `Save & Print ${docType.replace('_', ' ')}`}
+              </span>
+            </button>
+          </div>
+        </div>
       </div>
+
+      {/* Printable Invoice Modal */}
+      {createdTransaction && (
+        <PrintModal
+          transaction={createdTransaction}
+          onClose={() => setCreatedTransaction(null)}
+        />
+      )}
     </div>
   );
 }

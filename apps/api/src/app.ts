@@ -1,39 +1,51 @@
-import express, { Express, Request, Response } from 'express';
+// -------------------------------------------------
+// Express application — route mounting
+// -------------------------------------------------
+
+import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import path from 'path';
 import cookieParser from 'cookie-parser';
+
+import authRoutes from './routes/auth';
+import catalogRoutes from './routes/catalog';
+import partyRoutes from './routes/parties';
+import transactionRoutes from './routes/transactions';
+import inventoryRoutes from './routes/inventory';
+import reportRoutes from './routes/reports';
+import uploadRoutes from './routes/upload';
 import { config } from './config';
-import { catalogRouter } from './modules/catalog/catalog.router';
 
-export const createApp = (): Express => {
-  const app = express();
+const app = express();
 
-  // Basic middleware
-  app.use(
-    cors({
-      origin: config.corsOrigin,
-      credentials: true,
-    })
-  );
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
-  app.use(cookieParser(config.cookieSecret));
+// ── Middleware ───────────────────────────────────
+app.use(helmet({ crossOriginResourcePolicy: false }));
+app.use(cors({ origin: true, credentials: true }));
+app.use(express.json());
+app.use(cookieParser());
 
-  // Healthcheck endpoints
-  const healthHandler = (_req: Request, res: Response) => {
-    res.status(200).json({
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-    });
-  };
+// Serve uploaded images
+app.use('/uploads', express.static(path.resolve(config.uploadDir)));
 
-  app.get('/health', healthHandler);
-  app.get('/api/v1/health', healthHandler);
+// ── API Routes ──────────────────────────────────
+app.use('/api/v1/auth',         authRoutes);
+app.use('/api/v1/catalog',      catalogRoutes);        // /variants
+app.use('/api/v1/parties',      partyRoutes);
+app.use('/api/v1/transactions', transactionRoutes);
+app.use('/api/v1/inventory',    inventoryRoutes);       // /stock, /purchase-inward, /transfer
+app.use('/api/v1/reports',      reportRoutes);          // /dashboard, /commissions, /payments
+app.use('/api/v1/upload',       uploadRoutes);
 
-  // Mount API modules
-  app.use('/api/v1', catalogRouter);
+// ── Health check ────────────────────────────────
+app.get('/api/v1/health', (_req, res) => {
+  res.json({ status: 'ok', time: new Date().toISOString() });
+});
 
-  return app;
-};
+// ── Global error handler ────────────────────────
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Unhandled error:', err.message);
+  res.status(500).json({ error: 'Internal server error' });
+});
 
-export const app = createApp();
 export default app;

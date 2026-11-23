@@ -1,0 +1,1033 @@
+diff --git a/README.md b/README.md
+index 70bc19e..dc0149f 100644
+--- a/README.md
++++ b/README.md
+@@ -8,7 +8,19 @@
+ 
+ ## Local development
+ 
+-Use Node.js 22 or later. From the repository root, run `npm ci`, `npm run build:shared`, then `npm run dev`. The API applies migrations at startup and starts with an empty database. Fixtures live under the API tests and are loaded only by tests.
++<!-- coderabbit-ai-generated:v1 -->
++
++<!-- coderabbit-ai-generated-section:v1:eddfa2a9ed76c778b847ac282be3214f1a3d6e294ca2b5ac4d83a91e9d47fca7 -->
++
++<!-- coderabbit-ai-generated:v1 -->
++
++<!-- coderabbit-ai-generated-section:v1:86feeda44b9960caa76d6adfd616808a65a2f66cb2a8b318b71db93096615da7 -->
++
++Use Node.js 22.16 or later in the 22.x series, or Node.js 24 or later. Node's built-in SQLite needs FTS5 support for catalog search; the runtime may display an experimental SQLite warning. From the repository root, run `npm ci`, `npm run build:shared`, then `npm run dev`. The API uses Node's built-in SQLite support and applies migrations at startup. A fresh database starts empty. Fixtures live under the API tests and are loaded only by tests.
++
++<!-- /coderabbit-ai-generated:v1 -->
++
++<!-- /coderabbit-ai-generated:v1 -->
+ 
+ ## Production deployment
+ 
+diff --git a/apps/api/package.json b/apps/api/package.json
+index aecd0c2..f2c619f 100644
+--- a/apps/api/package.json
++++ b/apps/api/package.json
+@@ -14,7 +14,6 @@
+   "dependencies": {
+     "@lammart/shared": "*",
+     "express": "^4.21.1",
+-    "better-sqlite3": "^11.5.0",
+     "cors": "^2.8.5",
+     "jsonwebtoken": "^9.0.2",
+     "helmet": "^8.0.0",
+@@ -27,7 +26,6 @@
+   },
+   "devDependencies": {
+     "@types/express": "^4.17.21",
+-    "@types/better-sqlite3": "^7.6.11",
+     "@types/cors": "^2.8.17",
+     "@types/jsonwebtoken": "^9.0.7",
+     "@types/bcrypt": "^5.0.2",
+diff --git a/apps/api/src/db/client.ts b/apps/api/src/db/client.ts
+index 8125fd5..311ebe9 100644
+--- a/apps/api/src/db/client.ts
++++ b/apps/api/src/db/client.ts
+@@ -1,80 +1,64 @@
+-import Database, { Database as DatabaseType } from 'better-sqlite3';
+-import path from 'path';
+-import fs from 'fs';
++import type { DatabaseSync } from 'node:sqlite';
++const { DatabaseSync: SQLiteDatabase } = require('node:sqlite') as typeof import('node:sqlite');
++import path from 'node:path';
++import fs from 'node:fs';
+ import { config } from '../config';
+ 
+-let dbInstance: DatabaseType | null = null;
++let dbInstance: DatabaseSync | null = null;
+ let currentDbPath: string | null = null;
++let savepointSequence = 0;
+ 
+ export interface GetDbOptions {
+   path?: string;
+   forceNew?: boolean;
+ }
+ 
+-/**
+- * Returns a configured better-sqlite3 database instance with enforced pragmas:
+- * - journal_mode = WAL
+- * - foreign_keys = ON
+- * - busy_timeout = 5000
+- * - synchronous = NORMAL
+- */
+-export function getDb(optionsOrPath?: string | GetDbOptions): DatabaseType {
+-  let targetPath: string;
+-  let forceNew = false;
++/** Open the SQLite database using the same durability and integrity settings on every connection. */
++export function getDb(optionsOrPath?: string | GetDbOptions): DatabaseSync {
++  const options = typeof optionsOrPath === 'string' ? { path: optionsOrPath } : optionsOrPath;
++  const targetPath = options?.path || process.env.DB_PATH || config.dbPath;
++  if (dbInstance && currentDbPath === targetPath && !options?.forceNew) return dbInstance;
+ 
+-  if (typeof optionsOrPath === 'string') {
+-    targetPath = optionsOrPath;
+-  } else if (optionsOrPath && typeof optionsOrPath === 'object') {
+-    targetPath = optionsOrPath.path || process.env.DB_PATH || config.dbPath || path.resolve(process.cwd(), 'data/store.db');
+-    forceNew = Boolean(optionsOrPath.forceNew);
+-  } else {
+-    targetPath = process.env.DB_PATH || config.dbPath || path.resolve(process.cwd(), 'data/store.db');
+-  }
++  closeDb();
++  if (targetPath !== ':memory:') fs.mkdirSync(path.dirname(path.resolve(targetPath)), { recursive: true });
+ 
+-  if (dbInstance && currentDbPath === targetPath && !forceNew) {
+-    if (dbInstance.open) {
+-      return dbInstance;
+-    }
++  const db = new SQLiteDatabase(targetPath);
++  try {
++    db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA synchronous = NORMAL;');
++  } catch (error) {
++    db.close();
++    throw error;
+   }
++  dbInstance = db;
++  currentDbPath = targetPath;
++  return db;
++}
+ 
+-  if (dbInstance && dbInstance.open) {
++/** Run synchronous operations atomically. Savepoints also allow nested transactions. */
++export function inTransaction<T>(db: DatabaseSync, fn: () => T): T {
++  const name = `lammart_tx_${++savepointSequence}`;
++  db.exec(`SAVEPOINT ${name}`);
++  try {
++    const result = fn();
++    db.exec(`RELEASE SAVEPOINT ${name}`);
++    return result;
++  } catch (error) {
+     try {
+-      dbInstance.close();
+-    } catch (_) {}
+-  }
+-
+-  if (targetPath !== ':memory:') {
+-    const dbDir = path.dirname(path.resolve(targetPath));
+-    if (!fs.existsSync(dbDir)) {
+-      fs.mkdirSync(dbDir, { recursive: true });
++      db.exec(`ROLLBACK TO SAVEPOINT ${name}; RELEASE SAVEPOINT ${name}`);
++    } catch {
++      // Preserve the original error if SQLite has already rolled back the transaction.
+     }
++    throw error;
+   }
+-
+-  const db = new Database(targetPath);
+-
+-  // Enforce pragmas on every connection
+-  db.pragma('journal_mode = WAL;');
+-  db.pragma('foreign_keys = ON;');
+-  db.pragma('busy_timeout = 5000;');
+-  db.pragma('synchronous = NORMAL;');
+-
+-  dbInstance = db;
+-  currentDbPath = targetPath;
+-
+-  return db;
+ }
+ 
+-/**
+- * Closes the active database connection if open.
+- */
+ export function closeDb(): void {
+   if (dbInstance) {
+-    if (dbInstance.open) {
+-      try {
+-        dbInstance.close();
+-      } catch (_) {}
++    try {
++      dbInstance.close();
++    } finally {
++      dbInstance = null;
++      currentDbPath = null;
+     }
+-    dbInstance = null;
+-    currentDbPath = null;
+   }
+ }
+diff --git a/apps/api/src/db/migrate.ts b/apps/api/src/db/migrate.ts
+index efc1299..ca37e63 100644
+--- a/apps/api/src/db/migrate.ts
++++ b/apps/api/src/db/migrate.ts
+@@ -1,7 +1,7 @@
+ import fs from 'fs';
+ import path from 'path';
+-import type { Database as DatabaseType } from 'better-sqlite3';
+-import { getDb, closeDb } from './client';
++import type { DatabaseSync as DatabaseType } from 'node:sqlite';
++import { getDb, closeDb, inTransaction } from './client';
+ 
+ export interface MigrationResult {
+   applied: string[];
+@@ -58,12 +58,11 @@ export function runMigrations(db?: DatabaseType): MigrationResult {
+     const filePath = path.join(migrationsDir, file);
+     const sql = fs.readFileSync(filePath, 'utf-8');
+ 
+-    const applyMigration = database.transaction(() => {
++    inTransaction(database, () => {
+       database.exec(sql);
+       database.prepare('INSERT INTO schema_migrations (version) VALUES (?)').run(file);
+     });
+ 
+-    applyMigration();
+     applied.push(file);
+     console.log(`[migrate] Applied migration: ${file}`);
+   }
+diff --git a/apps/api/src/db/search.ts b/apps/api/src/db/search.ts
+index 6b3f16b..f107c4d 100644
+--- a/apps/api/src/db/search.ts
++++ b/apps/api/src/db/search.ts
+@@ -1,4 +1,5 @@
+-import type { Database as DatabaseType } from 'better-sqlite3';
++import type { DatabaseSync as DatabaseType } from 'node:sqlite';
++import { inTransaction } from './client';
+ 
+ /**
+  * Synchronizes a single product into the FTS5 product_search virtual table.
+@@ -77,7 +78,7 @@ export function syncProductSearch(db: DatabaseType, productId: number): void {
+  * Rebuilds the entire FTS5 product_search table from all active products.
+  */
+ export function rebuildProductSearch(db: DatabaseType): void {
+-  const syncAll = db.transaction(() => {
++  inTransaction(db, () => {
+     db.exec(`DELETE FROM product_search;`);
+ 
+     db.exec(`
+@@ -104,5 +105,4 @@ export function rebuildProductSearch(db: DatabaseType): void {
+     } catch (_) {}
+   });
+ 
+-  syncAll();
+ }
+diff --git a/apps/api/src/modules/catalog/category.repository.ts b/apps/api/src/modules/catalog/category.repository.ts
+index ae88c77..e1e73a8 100644
+--- a/apps/api/src/modules/catalog/category.repository.ts
++++ b/apps/api/src/modules/catalog/category.repository.ts
+@@ -1,4 +1,4 @@
+-import type { Database as DatabaseType } from 'better-sqlite3';
++import type { DatabaseSync as DatabaseType } from 'node:sqlite';
+ import { getDb } from '../../db/client';
+ import type { Category } from '@lammart/shared';
+ 
+@@ -33,7 +33,7 @@ export class CategoryRepository {
+         ORDER BY sort_order ASC, name ASC
+       `
+       )
+-      .all() as CategoryRow[];
++      .all() as unknown as CategoryRow[];
+ 
+     const categoryMap = new Map<number, Category>();
+     const rootCategories: Category[] = [];
+diff --git a/apps/api/src/modules/catalog/pincode.repository.ts b/apps/api/src/modules/catalog/pincode.repository.ts
+index a1f758d..800c0bc 100644
+--- a/apps/api/src/modules/catalog/pincode.repository.ts
++++ b/apps/api/src/modules/catalog/pincode.repository.ts
+@@ -1,4 +1,4 @@
+-import type { Database as DatabaseType } from 'better-sqlite3';
++import type { DatabaseSync as DatabaseType } from 'node:sqlite';
+ import { getDb } from '../../db/client';
+ import type { Pincode } from '@lammart/shared';
+ 
+diff --git a/apps/api/src/modules/catalog/product.repository.ts b/apps/api/src/modules/catalog/product.repository.ts
+index 8b0afd4..931d86b 100644
+--- a/apps/api/src/modules/catalog/product.repository.ts
++++ b/apps/api/src/modules/catalog/product.repository.ts
+@@ -1,4 +1,4 @@
+-import type { Database as DatabaseType } from 'better-sqlite3';
++import type { DatabaseSync as DatabaseType } from 'node:sqlite';
+ import { getDb } from '../../db/client';
+ import { CategoryRepository } from './category.repository';
+ import type {
+diff --git a/apps/api/tests/catalog.test.ts b/apps/api/tests/catalog.test.ts
+index e129376..f059e7d 100644
+--- a/apps/api/tests/catalog.test.ts
++++ b/apps/api/tests/catalog.test.ts
+@@ -40,10 +40,10 @@ describe('Milestone 2: Catalog & Database Infrastructure', () => {
+   describe('Database Schema & Seed Integrity', () => {
+     it('enforces pragmas (foreign keys, WAL mode, synchronous)', () => {
+       const db = getDb(TEST_DB_PATH);
+-      const foreignKeys = db.prepare('PRAGMA foreign_keys;').pluck().get();
++      const foreignKeys = db.prepare('PRAGMA foreign_keys;').get()?.foreign_keys;
+       expect(foreignKeys).toBe(1);
+ 
+-      const journalMode = db.prepare('PRAGMA journal_mode;').pluck().get();
++      const journalMode = db.prepare('PRAGMA journal_mode;').get()?.journal_mode;
+       expect(['wal', 'memory']).toContain(String(journalMode).toLowerCase());
+     });
+ 
+@@ -51,8 +51,7 @@ describe('Milestone 2: Catalog & Database Infrastructure', () => {
+       const db = getDb(TEST_DB_PATH);
+       const tables = db
+         .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';`)
+-        .pluck()
+-        .all() as string[];
++        .all().map((row) => String(row.name));
+ 
+       const expectedTables = [
+         'schema_migrations',
+@@ -83,8 +82,7 @@ describe('Milestone 2: Catalog & Database Infrastructure', () => {
+       // Check indexes
+       const indexes = db
+         .prepare(`SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%';`)
+-        .pluck()
+-        .all() as string[];
++        .all().map((row) => String(row.name));
+ 
+       expect(indexes).toContain('idx_products_category');
+       expect(indexes).toContain('idx_products_slug');
+@@ -104,13 +102,13 @@ describe('Milestone 2: Catalog & Database Infrastructure', () => {
+       expect(admin).toBeDefined();
+       expect(admin.email).toBe('admin@lammart.com');
+ 
+-      const shopGstin = db.prepare("SELECT value FROM settings WHERE key = 'shop_gstin'").pluck().get();
++      const shopGstin = db.prepare("SELECT value FROM settings WHERE key = 'shop_gstin'").get()?.value;
+       expect(shopGstin).toBe('24AAACL1234D1Z2');
+ 
+-      const productCount = db.prepare('SELECT COUNT(*) FROM products').pluck().get();
++      const productCount = db.prepare('SELECT COUNT(*) AS count FROM products').get()?.count;
+       expect(Number(productCount)).toBeGreaterThanOrEqual(20);
+ 
+-      const ftsCount = db.prepare('SELECT COUNT(*) FROM product_search').pluck().get();
++      const ftsCount = db.prepare('SELECT COUNT(*) AS count FROM product_search').get()?.count;
+       expect(Number(ftsCount)).toBeGreaterThanOrEqual(20);
+     });
+   });
+diff --git a/apps/api/tests/fixtures/catalog.ts b/apps/api/tests/fixtures/catalog.ts
+index 7678b2d..219f4c4 100644
+--- a/apps/api/tests/fixtures/catalog.ts
++++ b/apps/api/tests/fixtures/catalog.ts
+@@ -1,6 +1,7 @@
+ import bcrypt from 'bcrypt';
+-import type { Database as DatabaseType } from 'better-sqlite3';
++import type { DatabaseSync as DatabaseType } from 'node:sqlite';
+ import { runMigrations } from '../../src/db/migrate';
++import { inTransaction } from '../../src/db/client';
+ import { rebuildProductSearch } from '../../src/db/search';
+ 
+ export function seedDatabase(database: DatabaseType): void {
+@@ -10,7 +11,7 @@ export function seedDatabase(database: DatabaseType): void {
+ 
+   console.log('[seed] Seeding database...');
+ 
+-  const runSeed = database.transaction(() => {
++  inTransaction(database, () => {
+     // 1. Admin User
+     const adminPasswordHash = bcrypt.hashSync('Admin@12345', 12);
+     database
+@@ -938,7 +939,6 @@ export function seedDatabase(database: DatabaseType): void {
+     }
+   });
+ 
+-  runSeed();
+ 
+   // 7. Rebuild FTS5 index
+   rebuildProductSearch(database);
+diff --git a/apps/api/tests/migrations.test.ts b/apps/api/tests/migrations.test.ts
+index c0c6ca7..455a81f 100644
+--- a/apps/api/tests/migrations.test.ts
++++ b/apps/api/tests/migrations.test.ts
+@@ -1,16 +1,40 @@
+-import Database from 'better-sqlite3';
++const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
+ import { expect, it } from 'vitest';
+ import { runMigrations } from '../src/db/migrate';
++import { inTransaction } from '../src/db/client';
+ 
+ it('initializes a clean database without demo catalog, accounts or serviceability records', () => {
+-  const db = new Database(':memory:');
++  const db = new DatabaseSync(':memory:');
+   try {
+     expect(runMigrations(db).applied).toContain('002_contact_enquiries.sql');
+     expect(runMigrations(db).applied).toEqual([]);
+     for (const table of ['users', 'products', 'product_search', 'categories', 'brands', 'pincodes', 'settings', 'contact_enquiries']) {
+-      expect(db.prepare(`SELECT count(*) FROM ${table}`).pluck().get()).toBe(0);
++      expect(db.prepare(`SELECT count(*) AS count FROM ${table}`).get()?.count).toBe(0);
+     }
+   } finally {
+     db.close();
+   }
+ });
++
++it('rolls back failed transactions and keeps committed rows', () => {
++  const db = new DatabaseSync(':memory:');
++  try {
++    db.exec('CREATE TABLE entries (id INTEGER PRIMARY KEY, value TEXT NOT NULL)');
++    inTransaction(db, () => db.prepare('INSERT INTO entries (value) VALUES (?)').run('saved'));
++    expect(() => inTransaction(db, () => {
++      db.prepare('INSERT INTO entries (value) VALUES (?)').run('discarded');
++      throw new Error('abort');
++    })).toThrow('abort');
++    expect(db.prepare('SELECT value FROM entries').all().map(row => row.value)).toEqual(['saved']);
++    inTransaction(db, () => {
++      expect(() => inTransaction(db, () => {
++        db.prepare('INSERT INTO entries (value) VALUES (?)').run('nested discarded');
++        throw new Error('nested abort');
++      })).toThrow('nested abort');
++      db.prepare('INSERT INTO entries (value) VALUES (?)').run('nested saved');
++    });
++    expect(db.prepare('SELECT value FROM entries ORDER BY id').all().map(row => row.value)).toEqual(['saved', 'nested saved']);
++  } finally {
++    db.close();
++  }
++});
+diff --git a/package-lock.json b/package-lock.json
+index dcbfaa7..8e4fcd4 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -19,7 +19,7 @@
+         "typescript": "^5.6.3"
+       },
+       "engines": {
+-        "node": ">=22"
++        "node": "^22.16.0 || >=24.0.0"
+       }
+     },
+     "apps/api": {
+@@ -27,7 +27,6 @@
+       "version": "1.0.0",
+       "dependencies": {
+         "@lammart/shared": "*",
+-        "better-sqlite3": "^11.5.0",
+         "cors": "^2.8.5",
+         "dotenv": "^16.4.5",
+         "express": "^4.21.1",
+@@ -41,7 +40,6 @@
+       },
+       "devDependencies": {
+         "@types/bcrypt": "^5.0.2",
+-        "@types/better-sqlite3": "^7.6.11",
+         "@types/cors": "^2.8.17",
+         "@types/express": "^4.17.21",
+         "@types/jsonwebtoken": "^9.0.7",
+@@ -2322,16 +2320,6 @@
+         "@types/node": "*"
+       }
+     },
+-    "node_modules/@types/better-sqlite3": {
+-      "version": "7.6.13",
+-      "resolved": "https://registry.npmjs.org/@types/better-sqlite3/-/better-sqlite3-7.6.13.tgz",
+-      "integrity": "sha512-NMv9ASNARoKksWtsq/SHakpYAYnhBrQgGD8zkLYk/jaK8jUGn08CfEdTRgYhMypUQAfzSP8W6gNLe0q19/t4VA==",
+-      "dev": true,
+-      "license": "MIT",
+-      "dependencies": {
+-        "@types/node": "*"
+-      }
+-    },
+     "node_modules/@types/body-parser": {
+       "version": "1.19.6",
+       "resolved": "https://registry.npmjs.org/@types/body-parser/-/body-parser-1.19.6.tgz",
+@@ -3771,17 +3759,6 @@
+         "node": ">= 18"
+       }
+     },
+-    "node_modules/better-sqlite3": {
+-      "version": "11.10.0",
+-      "resolved": "https://registry.npmjs.org/better-sqlite3/-/better-sqlite3-11.10.0.tgz",
+-      "integrity": "sha512-EwhOpyXiOEL/lKzHz9AW1msWFNzGc/z+LzeB3/jnFJpxu+th2yqvzsSWas1v9jgs9+xiXJcD5A8CJxAG2TaghQ==",
+-      "hasInstallScript": true,
+-      "license": "MIT",
+-      "dependencies": {
+-        "bindings": "^1.5.0",
+-        "prebuild-install": "^7.1.1"
+-      }
+-    },
+     "node_modules/binary-extensions": {
+       "version": "2.3.0",
+       "resolved": "https://registry.npmjs.org/binary-extensions/-/binary-extensions-2.3.0.tgz",
+@@ -3795,26 +3772,6 @@
+         "url": "https://github.com/sponsors/sindresorhus"
+       }
+     },
+-    "node_modules/bindings": {
+-      "version": "1.5.0",
+-      "resolved": "https://registry.npmjs.org/bindings/-/bindings-1.5.0.tgz",
+-      "integrity": "sha512-p2q/t/mhvuOj/UeLlV6566GD/guowlr0hHxClI0W9m7MWYkL1F0hLo+0Aexs9HSPCtR1SXQ0TD3MMKrXZajbiQ==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "file-uri-to-path": "1.0.0"
+-      }
+-    },
+-    "node_modules/bl": {
+-      "version": "4.1.0",
+-      "resolved": "https://registry.npmjs.org/bl/-/bl-4.1.0.tgz",
+-      "integrity": "sha512-1W07cM9gS6DcLperZfFSj+bWLtaPGSOHWhPiGzXmvVJbRLdG82sH/Kn8EtW1VqWVA54AKf2h5k5BbnIbwF3h6w==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "buffer": "^5.5.0",
+-        "inherits": "^2.0.4",
+-        "readable-stream": "^3.4.0"
+-      }
+-    },
+     "node_modules/body-parser": {
+       "version": "1.20.9",
+       "resolved": "https://registry.npmjs.org/body-parser/-/body-parser-1.20.9.tgz",
+@@ -3930,30 +3887,6 @@
+         "node": "^6 || ^7 || ^8 || ^9 || ^10 || ^11 || ^12 || >=13.7"
+       }
+     },
+-    "node_modules/buffer": {
+-      "version": "5.7.1",
+-      "resolved": "https://registry.npmjs.org/buffer/-/buffer-5.7.1.tgz",
+-      "integrity": "sha512-EHcyIPBQ4BSGlvjB16k5KgAJ27CIsHY/2JBmCRReo48y9rQ3MaUzWX3KVlBa4U7MyX02HdVj0K7C3WaB3ju7FQ==",
+-      "funding": [
+-        {
+-          "type": "github",
+-          "url": "https://github.com/sponsors/feross"
+-        },
+-        {
+-          "type": "patreon",
+-          "url": "https://www.patreon.com/feross"
+-        },
+-        {
+-          "type": "consulting",
+-          "url": "https://feross.org/support"
+-        }
+-      ],
+-      "license": "MIT",
+-      "dependencies": {
+-        "base64-js": "^1.3.1",
+-        "ieee754": "^1.1.13"
+-      }
+-    },
+     "node_modules/buffer-equal-constant-time": {
+       "version": "1.0.1",
+       "resolved": "https://registry.npmjs.org/buffer-equal-constant-time/-/buffer-equal-constant-time-1.0.1.tgz",
+@@ -4161,12 +4094,6 @@
+         "node": ">= 6"
+       }
+     },
+-    "node_modules/chownr": {
+-      "version": "1.1.4",
+-      "resolved": "https://registry.npmjs.org/chownr/-/chownr-1.1.4.tgz",
+-      "integrity": "sha512-jJ0bqzaylmJtVnNgzTeSOs8DPavpbYgEr/b0YL8/2GO3xJEhInFmhKMUnEJQjZumK7KXGFhUy89PrsJWlakBVg==",
+-      "license": "ISC"
+-    },
+     "node_modules/class-variance-authority": {
+       "version": "0.7.1",
+       "resolved": "https://registry.npmjs.org/class-variance-authority/-/class-variance-authority-0.7.1.tgz",
+@@ -4478,21 +4405,6 @@
+         }
+       }
+     },
+-    "node_modules/decompress-response": {
+-      "version": "6.0.0",
+-      "resolved": "https://registry.npmjs.org/decompress-response/-/decompress-response-6.0.0.tgz",
+-      "integrity": "sha512-aW35yZM6Bb/4oJlZncMH2LCoZtJXTRxES17vE3hoRiowU2kWHaJKFkSBDnDR+cm9J+9QhXmREyIfv0pji9ejCQ==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "mimic-response": "^3.1.0"
+-      },
+-      "engines": {
+-        "node": ">=10"
+-      },
+-      "funding": {
+-        "url": "https://github.com/sponsors/sindresorhus"
+-      }
+-    },
+     "node_modules/deep-eql": {
+       "version": "5.0.2",
+       "resolved": "https://registry.npmjs.org/deep-eql/-/deep-eql-5.0.2.tgz",
+@@ -4535,15 +4447,6 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
+-    "node_modules/deep-extend": {
+-      "version": "0.6.0",
+-      "resolved": "https://registry.npmjs.org/deep-extend/-/deep-extend-0.6.0.tgz",
+-      "integrity": "sha512-LOHxIOaPYdHlJRtCQfDIVZtfw/ufM8+rVj649RIHzcm/vGwQRXFt6OPqIFWsm2XEMrNIEtWR64sY1LEKD2vAOA==",
+-      "license": "MIT",
+-      "engines": {
+-        "node": ">=4.0.0"
+-      }
+-    },
+     "node_modules/deep-is": {
+       "version": "0.1.4",
+       "resolved": "https://registry.npmjs.org/deep-is/-/deep-is-0.1.4.tgz",
+@@ -4619,6 +4522,7 @@
+       "resolved": "https://registry.npmjs.org/detect-libc/-/detect-libc-2.1.2.tgz",
+       "integrity": "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==",
+       "license": "Apache-2.0",
++      "optional": true,
+       "engines": {
+         "node": ">=8"
+       }
+@@ -4735,15 +4639,6 @@
+         "url": "https://opencollective.com/express"
+       }
+     },
+-    "node_modules/end-of-stream": {
+-      "version": "1.4.5",
+-      "resolved": "https://registry.npmjs.org/end-of-stream/-/end-of-stream-1.4.5.tgz",
+-      "integrity": "sha512-ooEGc6HP26xXq/N+GCGOT0JKCLDGrq2bQUZrQ7gyrJiZANJ/8YDTxTpQBXGMn+WbIQXNVpyWymm7KYVICQnyOg==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "once": "^1.4.0"
+-      }
+-    },
+     "node_modules/es-abstract": {
+       "version": "1.24.2",
+       "resolved": "https://registry.npmjs.org/es-abstract/-/es-abstract-1.24.2.tgz",
+@@ -5471,15 +5366,6 @@
+         "node": ">= 0.6"
+       }
+     },
+-    "node_modules/expand-template": {
+-      "version": "2.0.3",
+-      "resolved": "https://registry.npmjs.org/expand-template/-/expand-template-2.0.3.tgz",
+-      "integrity": "sha512-XYfuKMvj4O35f/pOXLObndIRvyQ+/+6AhODh+OKWj9S9498pHHn/IMszH+gt0fBCRWMNfk1ZSp5x3AifmnI2vg==",
+-      "license": "(MIT OR WTFPL)",
+-      "engines": {
+-        "node": ">=6"
+-      }
+-    },
+     "node_modules/expect-type": {
+       "version": "1.4.0",
+       "resolved": "https://registry.npmjs.org/expect-type/-/expect-type-1.4.0.tgz",
+@@ -5647,12 +5533,6 @@
+         "node": ">=16.0.0"
+       }
+     },
+-    "node_modules/file-uri-to-path": {
+-      "version": "1.0.0",
+-      "resolved": "https://registry.npmjs.org/file-uri-to-path/-/file-uri-to-path-1.0.0.tgz",
+-      "integrity": "sha512-0Zt+s3L7Vf1biwWZ29aARiVYLx7iMGnEUl9x33fbB/j3jR81u/O2LbqK+Bm1CDSNDKVtJ/YjwY7TUd5SkeLQLw==",
+-      "license": "MIT"
+-    },
+     "node_modules/fill-range": {
+       "version": "7.1.1",
+       "resolved": "https://registry.npmjs.org/fill-range/-/fill-range-7.1.1.tgz",
+@@ -5845,12 +5725,6 @@
+         "node": ">= 0.6"
+       }
+     },
+-    "node_modules/fs-constants": {
+-      "version": "1.0.0",
+-      "resolved": "https://registry.npmjs.org/fs-constants/-/fs-constants-1.0.0.tgz",
+-      "integrity": "sha512-y6OAwoSIf7FyjMIv94u+b5rdheZEjzR63GTyZJm5qh4Bi+2YgwLCcI/fPFZkL5PSixOt6ZNKm+w+Hfp/Bciwow==",
+-      "license": "MIT"
+-    },
+     "node_modules/fsevents": {
+       "version": "2.3.3",
+       "resolved": "https://registry.npmjs.org/fsevents/-/fsevents-2.3.3.tgz",
+@@ -6005,12 +5879,6 @@
+         "url": "https://github.com/privatenumber/get-tsconfig?sponsor=1"
+       }
+     },
+-    "node_modules/github-from-package": {
+-      "version": "0.0.0",
+-      "resolved": "https://registry.npmjs.org/github-from-package/-/github-from-package-0.0.0.tgz",
+-      "integrity": "sha512-SyHy3T1v2NUXn29OsWdxmK6RwHD+vkj3v8en8AOBZ1wBQ/hCAQ5bAQTD02kW4W9tUp/3Qh6J8r9EvntiyCmOOw==",
+-      "license": "MIT"
+-    },
+     "node_modules/glob": {
+       "version": "14.0.6",
+       "resolved": "https://registry.npmjs.org/glob/-/glob-14.0.6.tgz",
+@@ -6274,26 +6142,6 @@
+         "node": ">=0.10.0"
+       }
+     },
+-    "node_modules/ieee754": {
+-      "version": "1.2.1",
+-      "resolved": "https://registry.npmjs.org/ieee754/-/ieee754-1.2.1.tgz",
+-      "integrity": "sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==",
+-      "funding": [
+-        {
+-          "type": "github",
+-          "url": "https://github.com/sponsors/feross"
+-        },
+-        {
+-          "type": "patreon",
+-          "url": "https://www.patreon.com/feross"
+-        },
+-        {
+-          "type": "consulting",
+-          "url": "https://feross.org/support"
+-        }
+-      ],
+-      "license": "BSD-3-Clause"
+-    },
+     "node_modules/ignore": {
+       "version": "5.3.2",
+       "resolved": "https://registry.npmjs.org/ignore/-/ignore-5.3.2.tgz",
+@@ -6337,12 +6185,6 @@
+       "integrity": "sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==",
+       "license": "ISC"
+     },
+-    "node_modules/ini": {
+-      "version": "1.3.8",
+-      "resolved": "https://registry.npmjs.org/ini/-/ini-1.3.8.tgz",
+-      "integrity": "sha512-JV/yugV2uzW5iMRSiZAyDtQd+nxtUnjeLt0acNdw98kKLrvuRVyB80tsREOE7yvGVgalhZ6RNXCmEHkUKBKxew==",
+-      "license": "ISC"
+-    },
+     "node_modules/internal-slot": {
+       "version": "1.1.0",
+       "resolved": "https://registry.npmjs.org/internal-slot/-/internal-slot-1.1.0.tgz",
+@@ -7308,18 +7150,6 @@
+         "node": ">= 0.6"
+       }
+     },
+-    "node_modules/mimic-response": {
+-      "version": "3.1.0",
+-      "resolved": "https://registry.npmjs.org/mimic-response/-/mimic-response-3.1.0.tgz",
+-      "integrity": "sha512-z0yWI+4FDrrweS8Zmt4Ej5HdJmky15+L2e6Wgn3+iK5fWzb6T3fhNFq2+MeTRb064c6Wr4N/wv0DzQTjNzHNGQ==",
+-      "license": "MIT",
+-      "engines": {
+-        "node": ">=10"
+-      },
+-      "funding": {
+-        "url": "https://github.com/sponsors/sindresorhus"
+-      }
+-    },
+     "node_modules/minimatch": {
+       "version": "3.1.5",
+       "resolved": "https://registry.npmjs.org/minimatch/-/minimatch-3.1.5.tgz",
+@@ -7337,6 +7167,7 @@
+       "version": "1.2.8",
+       "resolved": "https://registry.npmjs.org/minimist/-/minimist-1.2.8.tgz",
+       "integrity": "sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA==",
++      "dev": true,
+       "license": "MIT",
+       "funding": {
+         "url": "https://github.com/sponsors/ljharb"
+@@ -7352,12 +7183,6 @@
+         "node": ">=16 || 14 >=14.17"
+       }
+     },
+-    "node_modules/mkdirp-classic": {
+-      "version": "0.5.3",
+-      "resolved": "https://registry.npmjs.org/mkdirp-classic/-/mkdirp-classic-0.5.3.tgz",
+-      "integrity": "sha512-gKLcREMhtuZRwRAfqP3RFW+TK4JqApVBtOIftVgjuABpAtpxhPGaDcfvbhNvD0B8iD1oUr/txX35NjcaY6Ns/A==",
+-      "license": "MIT"
+-    },
+     "node_modules/ms": {
+       "version": "2.1.3",
+       "resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
+@@ -7394,12 +7219,6 @@
+         "node": "^10 || ^12 || ^13.7 || ^14 || >=15.0.1"
+       }
+     },
+-    "node_modules/napi-build-utils": {
+-      "version": "2.0.0",
+-      "resolved": "https://registry.npmjs.org/napi-build-utils/-/napi-build-utils-2.0.0.tgz",
+-      "integrity": "sha512-GEbrYkbfF7MoNaoh2iGG84Mnf/WZfB0GdGEsM8wz7Expx/LlWf5U8t9nvJKXSp3qr5IsEbK04cBGhol/KwOsWA==",
+-      "license": "MIT"
+-    },
+     "node_modules/napi-postinstall": {
+       "version": "0.3.8",
+       "resolved": "https://registry.npmjs.org/napi-postinstall/-/napi-postinstall-0.3.8.tgz",
+@@ -7486,30 +7305,6 @@
+         }
+       }
+     },
+-    "node_modules/node-abi": {
+-      "version": "3.104.0",
+-      "resolved": "https://registry.npmjs.org/node-abi/-/node-abi-3.104.0.tgz",
+-      "integrity": "sha512-J2lVAHTQ8v1J7hl2k1eX70d/Fm+HE1EyUes2dOew59JgBlAW6NB7DABI8kdrgRPehhepJd18p1ivekA8BF7AOg==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "semver": "^7.3.5"
+-      },
+-      "engines": {
+-        "node": ">=10"
+-      }
+-    },
+-    "node_modules/node-abi/node_modules/semver": {
+-      "version": "7.8.6",
+-      "resolved": "https://registry.npmjs.org/semver/-/semver-7.8.6.tgz",
+-      "integrity": "sha512-9lpSSU4Mly3mrtruwLs1eLK6+gzbzqeBFwRNjIjE+9LuDpWdYctrQlQ3ej1Ilgi7gknpsTRnPoLP8DpCHqHIJw==",
+-      "license": "ISC",
+-      "bin": {
+-        "semver": "bin/semver.js"
+-      },
+-      "engines": {
+-        "node": ">=10"
+-      }
+-    },
+     "node_modules/node-addon-api": {
+       "version": "8.9.2",
+       "resolved": "https://registry.npmjs.org/node-addon-api/-/node-addon-api-8.9.2.tgz",
+@@ -7745,6 +7540,7 @@
+       "version": "1.4.0",
+       "resolved": "https://registry.npmjs.org/once/-/once-1.4.0.tgz",
+       "integrity": "sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==",
++      "dev": true,
+       "license": "ISC",
+       "dependencies": {
+         "wrappy": "1"
+@@ -8222,33 +8018,6 @@
+       "dev": true,
+       "license": "MIT"
+     },
+-    "node_modules/prebuild-install": {
+-      "version": "7.1.3",
+-      "resolved": "https://registry.npmjs.org/prebuild-install/-/prebuild-install-7.1.3.tgz",
+-      "integrity": "sha512-8Mf2cbV7x1cXPUILADGI3wuhfqWvtiLA1iclTDbFRZkgRQS0NqsPZphna9V+HyTEadheuPmjaJMsbzKQFOzLug==",
+-      "deprecated": "No longer maintained. Please contact the author of the relevant native addon; alternatives are available.",
+-      "license": "MIT",
+-      "dependencies": {
+-        "detect-libc": "^2.0.0",
+-        "expand-template": "^2.0.3",
+-        "github-from-package": "0.0.0",
+-        "minimist": "^1.2.3",
+-        "mkdirp-classic": "^0.5.3",
+-        "napi-build-utils": "^2.0.0",
+-        "node-abi": "^3.3.0",
+-        "pump": "^3.0.0",
+-        "rc": "^1.2.7",
+-        "simple-get": "^4.0.0",
+-        "tar-fs": "^2.0.0",
+-        "tunnel-agent": "^0.6.0"
+-      },
+-      "bin": {
+-        "prebuild-install": "bin.js"
+-      },
+-      "engines": {
+-        "node": ">=10"
+-      }
+-    },
+     "node_modules/prelude-ls": {
+       "version": "1.2.1",
+       "resolved": "https://registry.npmjs.org/prelude-ls/-/prelude-ls-1.2.1.tgz",
+@@ -8304,16 +8073,6 @@
+         "url": "https://opencollective.com/express"
+       }
+     },
+-    "node_modules/pump": {
+-      "version": "3.0.4",
+-      "resolved": "https://registry.npmjs.org/pump/-/pump-3.0.4.tgz",
+-      "integrity": "sha512-VS7sjc6KR7e1ukRFhQSY5LM2uBWAUPiOPa/A3mkKmiMwSmRFUITt0xuj+/lesgnCv+dPIEYlkzrcyXgquIHMcA==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "end-of-stream": "^1.1.0",
+-        "once": "^1.3.1"
+-      }
+-    },
+     "node_modules/punycode": {
+       "version": "2.3.1",
+       "resolved": "https://registry.npmjs.org/punycode/-/punycode-2.3.1.tgz",
+@@ -8391,30 +8150,6 @@
+         "node": ">= 0.8"
+       }
+     },
+-    "node_modules/rc": {
+-      "version": "1.2.8",
+-      "resolved": "https://registry.npmjs.org/rc/-/rc-1.2.8.tgz",
+-      "integrity": "sha512-y3bGgqKj3QBdxLbLkomlohkvsA8gdAiUQlSBJnBhfn+BPxg4bc62d8TcBW15wavDfgexCgccckhcZvywyQYPOw==",
+-      "license": "(BSD-2-Clause OR MIT OR Apache-2.0)",
+-      "dependencies": {
+-        "deep-extend": "^0.6.0",
+-        "ini": "~1.3.0",
+-        "minimist": "^1.2.0",
+-        "strip-json-comments": "~2.0.1"
+-      },
+-      "bin": {
+-        "rc": "cli.js"
+-      }
+-    },
+-    "node_modules/rc/node_modules/strip-json-comments": {
+-      "version": "2.0.1",
+-      "resolved": "https://registry.npmjs.org/strip-json-comments/-/strip-json-comments-2.0.1.tgz",
+-      "integrity": "sha512-4gB8na07fecVVkOI6Rs4e7T6NOTki5EmL7TUduTs6bu3EdnSycntVJ4re8kgZA+wx9IueI2Y11bfbgwtzuE0KQ==",
+-      "license": "MIT",
+-      "engines": {
+-        "node": ">=0.10.0"
+-      }
+-    },
+     "node_modules/react": {
+       "version": "19.3.1",
+       "resolved": "https://registry.npmjs.org/react/-/react-19.3.1.tgz",
+@@ -8472,20 +8207,6 @@
+       "dev": true,
+       "license": "MIT"
+     },
+-    "node_modules/readable-stream": {
+-      "version": "3.6.2",
+-      "resolved": "https://registry.npmjs.org/readable-stream/-/readable-stream-3.6.2.tgz",
+-      "integrity": "sha512-9u/sniCrY3D5WdsERHzHE4G2YCXqoG5FTHUiCC4SIbr6XcLZBY05ya9EKjYek9O5xOAwjGq+1JdGBAS7Q9ScoA==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "inherits": "^2.0.3",
+-        "string_decoder": "^1.1.1",
+-        "util-deprecate": "^1.0.1"
+-      },
+-      "engines": {
+-        "node": ">= 6"
+-      }
+-    },
+     "node_modules/readdirp": {
+       "version": "3.6.0",
+       "resolved": "https://registry.npmjs.org/readdirp/-/readdirp-3.6.0.tgz",
+@@ -9112,51 +8833,6 @@
+       "dev": true,
+       "license": "ISC"
+     },
+-    "node_modules/simple-concat": {
+-      "version": "1.0.1",
+-      "resolved": "https://registry.npmjs.org/simple-concat/-/simple-concat-1.0.1.tgz",
+-      "integrity": "sha512-cSFtAPtRhljv69IK0hTVZQ+OfE9nePi/rtJmw5UjHeVyVroEqJXP1sFztKUy1qU+xvz3u/sfYJLa947b7nAN2Q==",
+-      "funding": [
+-        {
+-          "type": "github",
+-          "url": "https://github.com/sponsors/feross"
+-        },
+-        {
+-          "type": "patreon",
+-          "url": "https://www.patreon.com/feross"
+-        },
+-        {
+-          "type": "consulting",
+-          "url": "https://feross.org/support"
+-        }
+-      ],
+-      "license": "MIT"
+-    },
+-    "node_modules/simple-get": {
+-      "version": "4.0.1",
+-      "resolved": "https://registry.npmjs.org/simple-get/-/simple-get-4.0.1.tgz",
+-      "integrity": "sha512-brv7p5WgH0jmQJr1ZDDfKDOSeWWg+OVypG99A/5vYGPqJ6pxiaHLy8nxtFjBA7oMa01ebA9gfh1uMCFqOuXxvA==",
+-      "funding": [
+-        {
+-          "type": "github",
+-          "url": "https://github.com/sponsors/feross"
+-        },
+-        {
+-          "type": "patreon",
+-          "url": "https://www.patreon.com/feross"
+-        },
+-        {
+-          "type": "consulting",
+-          "url": "https://feross.org/support"
+-        }
+-      ],
+-      "license": "MIT",
+-      "dependencies": {
+-        "decompress-response": "^6.0.0",
+-        "once": "^1.3.1",
+-        "simple-concat": "^1.0.0"
+-      }
+-    },
+     "node_modules/sonic-boom": {
+       "version": "4.2.1",
+       "resolved": "https://registry.npmjs.org/sonic-boom/-/sonic-boom-4.2.1.tgz",
+@@ -9237,15 +8913,6 @@
+         "node": ">= 0.4"
+       }
+     },
+-    "node_modules/string_decoder": {
+-      "version": "1.3.0",
+-      "resolved": "https://registry.npmjs.org/string_decoder/-/string_decoder-1.3.0.tgz",
+-      "integrity": "sha512-hkRX8U1WjJFd8LsDJ2yQ/wWWxaopEsABU1XfkM8A+j0+85JAGppt16cr1Whg6KIbb4okU6Mql6BOj+uup/wKeA==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "safe-buffer": "~5.2.0"
+-      }
+-    },
+     "node_modules/string-width": {
+       "version": "4.2.3",
+       "resolved": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
+@@ -9662,34 +9329,6 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
+-    "node_modules/tar-fs": {
+-      "version": "2.1.5",
+-      "resolved": "https://registry.npmjs.org/tar-fs/-/tar-fs-2.1.5.tgz",
+-      "integrity": "sha512-OboTd8mmMhZDNPV+UjQcK9yKAatXu2aJ+r1w4im1Otd4M4fl2hwvdoXUxIYHFTHWK/3y3FarBP70v3vwmGlOxw==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "chownr": "^1.1.1",
+-        "mkdirp-classic": "^0.5.2",
+-        "pump": "^3.0.0",
+-        "tar-stream": "^2.1.4"
+-      }
+-    },
+-    "node_modules/tar-stream": {
+-      "version": "2.2.0",
+-      "resolved": "https://registry.npmjs.org/tar-stream/-/tar-stream-2.2.0.tgz",
+-      "integrity": "sha512-ujeqbceABgwMZxEJnk2HDY2DlnUZ+9oEcb1KzTVfYHio0UE6dG71n60d8D2I4qNvleWrrXpmjpt7vZeF1LnMZQ==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "bl": "^4.0.3",
+-        "end-of-stream": "^1.4.1",
+-        "fs-constants": "^1.0.0",
+-        "inherits": "^2.0.3",
+-        "readable-stream": "^3.1.1"
+-      },
+-      "engines": {
+-        "node": ">=6"
+-      }
+-    },
+     "node_modules/thenify": {
+       "version": "3.3.1",
+       "resolved": "https://registry.npmjs.org/thenify/-/thenify-3.3.1.tgz",
+@@ -9923,18 +9562,6 @@
+         "fsevents": "~2.3.3"
+       }
+     },
+-    "node_modules/tunnel-agent": {
+-      "version": "0.6.0",
+-      "resolved": "https://registry.npmjs.org/tunnel-agent/-/tunnel-agent-0.6.0.tgz",
+-      "integrity": "sha512-McnNiV1l8RYeY8tBgEpuodCC1mLUdbSN+CYBL7kJsJNInOP8UjDDEwdk6Mw60vdLLrr5NHKZhMAOSrR2NZuQ+w==",
+-      "license": "Apache-2.0",
+-      "dependencies": {
+-        "safe-buffer": "^5.0.1"
+-      },
+-      "engines": {
+-        "node": "*"
+-      }
+-    },
+     "node_modules/type-check": {
+       "version": "0.4.0",
+       "resolved": "https://registry.npmjs.org/type-check/-/type-check-0.4.0.tgz",
+@@ -10218,6 +9845,7 @@
+       "version": "1.0.2",
+       "resolved": "https://registry.npmjs.org/util-deprecate/-/util-deprecate-1.0.2.tgz",
+       "integrity": "sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==",
++      "dev": true,
+       "license": "MIT"
+     },
+     "node_modules/utils-merge": {
+@@ -10968,6 +10596,7 @@
+       "version": "1.0.2",
+       "resolved": "https://registry.npmjs.org/wrappy/-/wrappy-1.0.2.tgz",
+       "integrity": "sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==",
++      "dev": true,
+       "license": "ISC"
+     },
+     "node_modules/y18n": {
+diff --git a/package.json b/package.json
+index 960f348..b31c915 100644
+--- a/package.json
++++ b/package.json
+@@ -42,6 +42,6 @@
+     "postcss": "8.5.33"
+   },
+   "engines": {
+-    "node": ">=22"
++    "node": "^22.16.0 || >=24.0.0"
+   }
+ }

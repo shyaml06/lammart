@@ -22,12 +22,13 @@
     "dev:api": "npm -w apps/api run dev",
     "dev:web": "npm -w apps/web run dev",
     "migrate": "npm -w apps/api run migrate",
-    "seed": "npm -w apps/api run seed"
+    "start:api": "npm -w apps/api run start",
+    "start:web": "npm -w apps/web run start",
+    "admin:create": "npm -w apps/api run admin:create --"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
-    "eslint": "^8.57.0",
-    "next": "14.2.15",
+    "eslint": "^9.39.0",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
   },
@@ -37,5 +38,11 @@
     "hardware"
   ],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "overrides": {
+    "postcss": "8.5.33"
+  },
+  "engines": {
+    "node": "^22.16.0 || >=24.0.0"
+  }
 }

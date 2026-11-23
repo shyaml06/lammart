@@ -7,6 +7,8 @@ export const productFilterSchema = z.object({
   sort: z.enum(['price_asc', 'price_desc', 'newest', 'name_asc']).optional(),
   page: z.coerce.number().int().positive().optional().default(1),
   limit: z.coerce.number().int().positive().max(100).optional().default(24),
+  minPrice: z.coerce.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+  maxPrice: z.coerce.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   // Dynamic filter attributes (thickness, finish, etc.)
 }).passthrough();
 export type ProductFilterInput = z.infer<typeof productFilterSchema>;
