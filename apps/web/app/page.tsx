@@ -474,14 +474,14 @@ export default function CounterBillingPage() {
       }}
     >
       {/* Top Banner: Mode & Settings Switcher */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#E7E2D9] flex flex-wrap items-center justify-between gap-4">
+      <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#E7E2D9] flex flex-col md:flex-row md:items-center justify-between gap-4">
         {/* Document Mode Switcher */}
-        <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl">
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-1 bg-gray-100 p-1 rounded-xl w-full md:w-auto">
           <button
             type="button"
             aria-pressed={docType === 'Delivery_Challan'}
             onClick={() => setDocType('Delivery_Challan')}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+            className={`flex-1 sm:flex-none text-center px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition ${
               docType === 'Delivery_Challan'
                 ? 'bg-[#0B7A55] text-white shadow'
                 : 'text-gray-600 hover:text-gray-900'
@@ -493,7 +493,7 @@ export default function CounterBillingPage() {
             type="button"
             aria-pressed={docType === 'Tax_Invoice'}
             onClick={() => setDocType('Tax_Invoice')}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+            className={`flex-1 sm:flex-none text-center px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition ${
               docType === 'Tax_Invoice'
                 ? 'bg-[#0B7A55] text-white shadow'
                 : 'text-gray-600 hover:text-gray-900'
@@ -505,7 +505,7 @@ export default function CounterBillingPage() {
             type="button"
             aria-pressed={docType === 'Estimate'}
             onClick={() => setDocType('Estimate')}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+            className={`flex-1 sm:flex-none text-center px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition ${
               docType === 'Estimate'
                 ? 'bg-[#0B7A55] text-white shadow'
                 : 'text-gray-600 hover:text-gray-900'
@@ -515,46 +515,49 @@ export default function CounterBillingPage() {
           </button>
         </div>
 
-        {/* Dispatch Location Selector (for Challan & Invoice) */}
-        {docType !== 'Estimate' && (
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-gray-500 font-medium">Dispatch From:</span>
-            <div className="flex rounded-lg overflow-hidden border border-gray-300">
-              <button
-                type="button"
-                onClick={() => setDispatchFrom('Godown')}
-                className={`px-3 py-1.5 text-xs font-semibold ${
-                  dispatchFrom === 'Godown' ? 'bg-emerald-800 text-white' : 'bg-white text-gray-700'
-                }`}
-              >
-                Main Godown
-              </button>
-              <button
-                type="button"
-                onClick={() => setDispatchFrom('Showroom')}
-                className={`px-3 py-1.5 text-xs font-semibold ${
-                  dispatchFrom === 'Showroom' ? 'bg-emerald-800 text-white' : 'bg-white text-gray-700'
-                }`}
-              >
-                Showroom Display
-              </button>
+        {/* Right controls: Dispatch Location & Transport */}
+        <div className="flex flex-wrap items-center gap-4 w-full md:w-auto justify-between md:justify-end">
+          {/* Dispatch Location Selector (for Challan & Invoice) */}
+          {docType !== 'Estimate' && (
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-gray-500 font-medium text-xs">Dispatch From:</span>
+              <div className="flex rounded-lg overflow-hidden border border-gray-300">
+                <button
+                  type="button"
+                  onClick={() => setDispatchFrom('Godown')}
+                  className={`px-3 py-1.5 text-xs font-semibold ${
+                    dispatchFrom === 'Godown' ? 'bg-emerald-800 text-white' : 'bg-white text-gray-700'
+                  }`}
+                >
+                  Main Godown
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDispatchFrom('Showroom')}
+                  className={`px-3 py-1.5 text-xs font-semibold ${
+                    dispatchFrom === 'Showroom' ? 'bg-emerald-800 text-white' : 'bg-white text-gray-700'
+                  }`}
+                >
+                  Showroom Display
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Transport Details (hidden for Estimate) */}
-        {docType !== 'Estimate' && (
-          <div className="flex items-center gap-2 text-sm w-full md:w-auto">
-            <Truck className="w-4 h-4 text-gray-400 shrink-0" />
-            <input
-              type="text"
-              placeholder="Vehicle / Tempo No. (e.g. GJ01AB1234)"
-              value={transportDetails}
-              onChange={(e) => setTransportDetails(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs w-full md:w-56 focus:outline-none focus:border-emerald-600"
-            />
-          </div>
-        )}
+          {/* Transport Details (hidden for Estimate, full width on mobile) */}
+          {docType !== 'Estimate' && (
+            <div className="flex items-center gap-2 text-sm w-full sm:w-auto">
+              <Truck className="w-4 h-4 text-gray-400 shrink-0" />
+              <input
+                type="text"
+                placeholder="Vehicle / Tempo No. (e.g. GJ01AB1234)"
+                value={transportDetails}
+                onChange={(e) => setTransportDetails(e.target.value)}
+                className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs w-full sm:w-56 focus:outline-none focus:border-emerald-600"
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Main Grid: Left = Item Entry & Cart, Right = Customer & Billing Summary */}
@@ -830,7 +833,7 @@ export default function CounterBillingPage() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
+                <table className="w-full text-left text-sm min-w-[700px]">
                   <thead className="bg-gray-100/75 text-gray-700 text-xs uppercase font-semibold border-b border-gray-200">
                     <tr>
                       <th className="py-3 px-4">#</th>
