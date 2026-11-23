@@ -215,19 +215,22 @@ export default function PrintModal({ transaction, onClose }: PrintModalProps) {
     <>
       <dialog ref={dialog} aria-labelledby="print-preview-title"
         onCancel={(event) => { event.preventDefault(); onClose(); }}
-        className="no-print max-h-[90dvh] w-[calc(100%_-_2rem)] max-w-4xl overflow-y-auto rounded-2xl bg-white p-0 backdrop:bg-black/60">
-        <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border bg-white p-3">
-          <h2 id="print-preview-title" className="mr-auto font-heading font-bold">{docTitle} preview</h2>
-          <label className="text-sm">Paper format{' '}
-            <select className="min-h-11 rounded-lg border border-chip px-2" value={layout} onChange={(event) => setLayout(event.target.value === 'thermal' ? 'thermal' : 'a4')}>
-              <option value="a4">A4 document</option>
-              <option value="thermal">80 mm receipt copy</option>
-            </select>
-          </label>
-          <button type="button" onClick={() => window.print()} className="min-h-11 rounded-xl bg-primary px-4 text-sm font-semibold text-white hover:bg-primary-hover">Print document</button>
-          <button type="button" onClick={onClose} aria-label="Close print preview" title="Close print preview" className="icon-action"><X aria-hidden="true" className="h-5 w-5" /></button>
+        className="no-print max-h-[90dvh] w-[calc(100%_-_2rem)] max-w-4xl overflow-y-auto rounded-lg bg-surface text-text p-0 border border-border shadow-pop backdrop:bg-black/40 backdrop:backdrop-blur-sm">
+        <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface p-4">
+          <h2 id="print-preview-title" className="font-serif text-lg font-normal text-text">{docTitle} preview</h2>
+          <div className="flex items-center gap-3">
+            <label className="text-xs text-text-muted flex items-center gap-1.5">
+              <span>Paper format</span>
+              <select className="h-8 rounded-md border border-border bg-surface-sunken px-2 text-xs text-text focus-visible:ring-2 focus-visible:ring-accent/40" value={layout} onChange={(event) => setLayout(event.target.value === 'thermal' ? 'thermal' : 'a4')}>
+                <option value="a4">A4 document</option>
+                <option value="thermal">80 mm receipt copy</option>
+              </select>
+            </label>
+            <button type="button" onClick={() => window.print()} className="h-8 rounded-md bg-accent px-3.5 text-xs font-medium text-white hover:bg-accent-hover transition duration-150">Print document</button>
+            <button type="button" onClick={onClose} aria-label="Close print preview" title="Close print preview" className="w-8 h-8 rounded-md flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-sunken transition duration-150"><X aria-hidden="true" className="h-4 w-4 stroke-[1.5]" /></button>
+          </div>
         </div>
-        <div className="overflow-x-auto">{layout === 'a4' ? a4 : receipt}</div>
+        <div className="overflow-x-auto bg-surface">{layout === 'a4' ? a4 : receipt}</div>
       </dialog>
       <div className="print-copy" aria-hidden="true"><style>{pageCss}</style>{layout === 'a4' ? a4 : receipt}</div>
     </>, window.document.body,

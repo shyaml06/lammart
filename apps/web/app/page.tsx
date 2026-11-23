@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useRef } from 'react';
 import {
-  Search, Plus, Trash2, Printer, ArrowRight,
-  Truck, UserCheck, ShieldAlert, Package,
-  Layers, AlertTriangle, RefreshCw, X, UserPlus, Check
+  Search, Plus, Trash2, Printer,
+  Truck, ShieldAlert,
+  AlertTriangle, RefreshCw, X, UserPlus, Check,
+  Sun, Moon, RotateCcw
 } from 'lucide-react';
 import { apiRequest } from '@/lib/api';
 import { formatINR } from '@/lib/formatters';
@@ -46,7 +47,7 @@ interface CartItem {
 
 export function formatPartyType(type?: string): string {
   if (!type) return '';
-  return type.replace(/_/g, ' ');
+  return type.replace(/_/g, ' ').toLowerCase();
 }
 
 export default function CounterBillingPage() {
@@ -55,6 +56,10 @@ export default function CounterBillingPage() {
   const [dispatchFrom, setDispatchFrom] = useState<'Showroom' | 'Godown'>('Godown');
   const [transportDetails, setTransportDetails] = useState('');
   const [notes, setNotes] = useState('');
+
+  // UI preferences
+  const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
+  const [isDark, setIsDark] = useState(false);
 
   // Parties
   const [customers, setCustomers] = useState<Party[]>([]);
@@ -105,6 +110,22 @@ export default function CounterBillingPage() {
   const submitLock = useRef(false);
   const rateInputRef = useRef<HTMLInputElement>(null);
   const qtyInputRef = useRef<HTMLInputElement>(null);
+
+  // Initialize theme from document or localStorage
+  useEffect(() => {
+    const isDarkTheme = document.documentElement.getAttribute('data-theme') === 'dark';
+    setIsDark(isDarkTheme);
+  }, []);
+
+  const toggleTheme = () => {
+    const next = !isDark;
+    setIsDark(next);
+    if (next) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+  };
 
   // Autofocus search on load
   useEffect(() => {
@@ -168,8 +189,14 @@ export default function CounterBillingPage() {
 
       setCustomers(allCust);
       setReferrers(allRef);
+
+      // Default to Walk-in customer if present, or leave unselected
+      const walkIn = allCust.find((c) => c.name.toLowerCase().includes('walk-in') || c.phone === '9000000000');
+      if (walkIn && !selectedCustomerId) {
+        setSelectedCustomerId(walkIn.id);
+      }
     } catch {
-      setPartyError('Failed to load customers and referrers. Please check connection and retry.');
+      setPartyError('Unable to load customer list. Please check your network and retry.');
     } finally {
       setPartiesLoading(false);
     }
@@ -203,7 +230,7 @@ export default function CounterBillingPage() {
         }
       } catch {
         if (!controller.signal.aborted) {
-          setSearchError('Search failed. Refine your query or check connection.');
+          setSearchError('Search failed. Try a shade code or refine your keywords.');
         }
       } finally {
         if (!controller.signal.aborted) {
@@ -243,7 +270,7 @@ export default function CounterBillingPage() {
     if (!selectedVariant || parsedQty <= 0) return;
 
     if (isStockDeficit && !allowOversell) {
-      setErrorMessage(`Insufficient stock in ${dispatchFrom} (${selectedLocationStock} available). Check override to proceed.`);
+      setErrorMessage(`Only ${selectedLocationStock} available in ${dispatchFrom.toLowerCase()}. Check allow oversell to proceed.`);
       return;
     }
 
@@ -262,7 +289,7 @@ export default function CounterBillingPage() {
         discountPercent: itemDiscount,
       };
       setCartItems(updatedCart);
-      setUserNotification(`Merged into existing line: ${selectedVariant.brand} ${selectedVariant.designCode} now at ${newQty} ${selectedVariant.unit}s.`);
+      setUserNotification(`Merged into existing row: ${selectedVariant.brand} ${selectedVariant.designCode} now at ${newQty} ${selectedVariant.unit.toLowerCase()}s.`);
       setTimeout(() => setUserNotification(null), 3500);
     } else {
       setCartItems((prev) => [
@@ -300,6 +327,16 @@ export default function CounterBillingPage() {
     setCartItems((prev) => prev.filter((item) => item.id !== id));
   };
 
+  // Clear entire cart
+  const handleClearCart = () => {
+    if (cartItems.length > 0 && confirm('Clear all items from this bill?')) {
+      setCartItems([]);
+      setErrorMessage(null);
+      setUserNotification(null);
+      searchInputRef.current?.focus();
+    }
+  };
+
   // Quick Add Customer Handler
   const handleCreateCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -331,7 +368,7 @@ export default function CounterBillingPage() {
       setUserNotification(`Customer "${newParty.name}" added and selected.`);
       setTimeout(() => setUserNotification(null), 3500);
     } catch (err: any) {
-      setPartyCreateError(err.message || 'Failed to create customer');
+      setPartyCreateError(err.message || 'Failed to save customer');
     } finally {
       setIsSavingParty(false);
     }
@@ -386,7 +423,6 @@ export default function CounterBillingPage() {
   const totalCgst = totalCgstPaise / 100;
   const totalSgst = totalSgstPaise / 100;
   const totalIgst = totalIgstPaise / 100;
-  const taxAmount = (totalCgstPaise + totalSgstPaise + totalIgstPaise) / 100;
   const grandTotal = (totalTaxablePaise + totalCgstPaise + totalSgstPaise + totalIgstPaise) / 100;
 
   // Selected Referrer Commission Preview
@@ -397,11 +433,11 @@ export default function CounterBillingPage() {
   // Submit Transaction (Save & Print)
   const handleSubmit = async () => {
     if (!selectedCustomerId) {
-      setErrorMessage('Please select a customer or Walk-in Customer before creating a transaction.');
+      setErrorMessage('Pick a customer to continue.');
       return;
     }
     if (cartItems.length === 0) {
-      setErrorMessage('Add at least one item to the bill before submitting.');
+      setErrorMessage('Add at least one item to the bill before saving.');
       return;
     }
 
@@ -437,16 +473,23 @@ export default function CounterBillingPage() {
       setTransportDetails('');
       setNotes('');
     } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to create transaction');
+      setErrorMessage(err.message || 'Failed to save transaction');
     } finally {
       submitLock.current = false;
       setIsSubmitting(false);
     }
   };
 
+  const docActionLabel =
+    docType === 'Delivery_Challan'
+      ? 'Save and print challan'
+      : docType === 'Tax_Invoice'
+      ? 'Save and print invoice'
+      : 'Save and print estimate';
+
   return (
     <div
-      className="space-y-6"
+      className="max-w-[1200px] mx-auto space-y-8 pb-24 lg:pb-8"
       onKeyDown={(e) => {
         if (e.defaultPrevented || e.nativeEvent.isComposing || createdTransaction) return;
         // F2: Focus SKU Search
@@ -473,126 +516,168 @@ export default function CounterBillingPage() {
         }
       }}
     >
-      {/* Top Banner: Mode & Settings Switcher */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm border border-border flex flex-col md:flex-row md:items-center justify-between gap-4">
-        {/* Document Mode Switcher */}
-        <div className="flex flex-wrap sm:flex-nowrap items-center gap-1 bg-gray-100 p-1 rounded-xl w-full md:w-auto">
-          <button
-            type="button"
-            aria-pressed={docType === 'Delivery_Challan'}
-            onClick={() => setDocType('Delivery_Challan')}
-            className={`flex-1 sm:flex-none text-center px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition ${
-              docType === 'Delivery_Challan'
-                ? 'bg-brand text-white shadow'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            Delivery Challan
-          </button>
-          <button
-            type="button"
-            aria-pressed={docType === 'Tax_Invoice'}
-            onClick={() => setDocType('Tax_Invoice')}
-            className={`flex-1 sm:flex-none text-center px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition ${
-              docType === 'Tax_Invoice'
-                ? 'bg-brand text-white shadow'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            GST Tax Invoice
-          </button>
-          <button
-            type="button"
-            aria-pressed={docType === 'Estimate'}
-            onClick={() => setDocType('Estimate')}
-            className={`flex-1 sm:flex-none text-center px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition ${
-              docType === 'Estimate'
-                ? 'bg-brand text-white shadow'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            Quotation / Estimate
-          </button>
+      {/* Editorial Header */}
+      <header className="space-y-4 border-b border-border pb-6">
+        <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-4">
+          <div>
+            <h1 className="text-3xl sm:text-4xl font-serif font-normal text-text tracking-tight">
+              New bill
+            </h1>
+            <p className="text-sm text-text-muted mt-1 font-normal">
+              Create a delivery challan, GST tax invoice, or estimate.
+            </p>
+          </div>
+
+          {/* Quick utility toggles (Density & Theme) */}
+          <div className="flex items-center gap-2 self-start sm:self-center">
+            <button
+              type="button"
+              onClick={() => setDensity(density === 'comfortable' ? 'compact' : 'comfortable')}
+              className="text-xs text-text-muted hover:text-text px-2.5 py-1.5 rounded-md border border-border bg-surface hover:bg-surface-sunken transition duration-150"
+              title="Toggle table density"
+            >
+              {density === 'comfortable' ? 'Compact' : 'Comfortable'}
+            </button>
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
+              className="w-8 h-8 rounded-md border border-border bg-surface text-text-muted hover:text-text flex items-center justify-center hover:bg-surface-sunken transition duration-150"
+            >
+              {isDark ? <Sun className="w-4 h-4 stroke-[1.5]" /> : <Moon className="w-4 h-4 stroke-[1.5]" />}
+            </button>
+          </div>
         </div>
 
-        {/* Right controls: Dispatch Location & Transport */}
-        <div className="flex flex-wrap items-center gap-4 w-full md:w-auto justify-between md:justify-end">
-          {/* Dispatch Location Selector (for Challan & Invoice) */}
+        {/* Quiet Document Switcher & Controls */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+          {/* Pill Segmented Switcher */}
+          <div
+            role="tablist"
+            aria-label="Document type"
+            className="inline-flex items-center gap-1 bg-surface-sunken p-1 rounded-pill border border-border"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={docType === 'Delivery_Challan'}
+              aria-pressed={docType === 'Delivery_Challan'}
+              onClick={() => setDocType('Delivery_Challan')}
+              className={`px-3.5 py-1 text-xs sm:text-sm rounded-pill transition duration-150 font-normal ${
+                docType === 'Delivery_Challan'
+                  ? 'bg-surface text-text shadow-sm border border-border/80 font-medium'
+                  : 'text-text-muted hover:text-text'
+              }`}
+            >
+              Delivery challan
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={docType === 'Tax_Invoice'}
+              aria-pressed={docType === 'Tax_Invoice'}
+              onClick={() => setDocType('Tax_Invoice')}
+              className={`px-3.5 py-1 text-xs sm:text-sm rounded-pill transition duration-150 font-normal ${
+                docType === 'Tax_Invoice'
+                  ? 'bg-surface text-text shadow-sm border border-border/80 font-medium'
+                  : 'text-text-muted hover:text-text'
+              }`}
+            >
+              Tax invoice
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={docType === 'Estimate'}
+              aria-pressed={docType === 'Estimate'}
+              onClick={() => setDocType('Estimate')}
+              className={`px-3.5 py-1 text-xs sm:text-sm rounded-pill transition duration-150 font-normal ${
+                docType === 'Estimate'
+                  ? 'bg-surface text-text shadow-sm border border-border/80 font-medium'
+                  : 'text-text-muted hover:text-text'
+              }`}
+            >
+              Estimate
+            </button>
+          </div>
+
+          {/* Secondary Dispatch & Transport Controls */}
           {docType !== 'Estimate' && (
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-gray-500 font-medium text-xs">Dispatch From:</span>
-              <div className="flex rounded-lg overflow-hidden border border-gray-300">
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Dispatch-from switcher */}
+              <div className="inline-flex items-center gap-0.5 bg-surface-sunken p-0.5 rounded-pill border border-border text-xs">
+                <span className="text-text-faint pl-2 pr-1 text-[11px]">From</span>
                 <button
                   type="button"
                   aria-pressed={dispatchFrom === 'Godown'}
                   onClick={() => setDispatchFrom('Godown')}
-                  className={`px-3 py-1.5 text-xs font-semibold ${
-                    dispatchFrom === 'Godown' ? 'bg-brand-dark text-white' : 'bg-white text-gray-700'
+                  className={`px-2.5 py-1 rounded-pill transition duration-150 ${
+                    dispatchFrom === 'Godown'
+                      ? 'bg-surface text-text shadow-sm font-medium'
+                      : 'text-text-muted hover:text-text'
                   }`}
                 >
-                  Main Godown
+                  Main godown
                 </button>
                 <button
                   type="button"
                   aria-pressed={dispatchFrom === 'Showroom'}
                   onClick={() => setDispatchFrom('Showroom')}
-                  className={`px-3 py-1.5 text-xs font-semibold ${
-                    dispatchFrom === 'Showroom' ? 'bg-brand-dark text-white' : 'bg-white text-gray-700'
+                  className={`px-2.5 py-1 rounded-pill transition duration-150 ${
+                    dispatchFrom === 'Showroom'
+                      ? 'bg-surface text-text shadow-sm font-medium'
+                      : 'text-text-muted hover:text-text'
                   }`}
                 >
-                  Showroom Display
+                  Showroom
                 </button>
+              </div>
+
+              {/* Transport Vehicle Input */}
+              <div className="relative">
+                <label htmlFor="pos-transport" className="sr-only">Vehicle or tempo number</label>
+                <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-text-faint">
+                  <Truck className="w-3.5 h-3.5 stroke-[1.5]" />
+                </div>
+                <input
+                  id="pos-transport"
+                  type="text"
+                  placeholder="Vehicle / tempo no."
+                  value={transportDetails}
+                  onChange={(e) => setTransportDetails(e.target.value)}
+                  className="h-8 pl-8 pr-3 text-xs bg-surface-sunken border border-border rounded-md text-text placeholder:text-text-faint focus-visible:border-accent transition duration-150"
+                />
               </div>
             </div>
           )}
-
-          {/* Transport Details (hidden for Estimate, full width on mobile) */}
-          {docType !== 'Estimate' && (
-            <div className="flex items-center gap-2 text-sm w-full sm:w-auto">
-              <Truck className="w-4 h-4 text-gray-400 shrink-0" />
-              <input
-                type="text"
-                placeholder="Vehicle / Tempo No. (e.g. GJ01AB1234)"
-                value={transportDetails}
-                onChange={(e) => setTransportDetails(e.target.value)}
-                className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs w-full sm:w-56 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
-              />
-            </div>
-          )}
         </div>
-      </div>
+      </header>
 
-      {/* Main Grid: Left = Item Entry & Cart, Right = Customer & Billing Summary */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-        {/* Left Column (2 Cols): Quick Autocomplete & Cart Table */}
-        <div className="min-w-0 lg:col-span-2 space-y-6">
-          {/* Quick Search & Fast Entry Bar */}
-          <div ref={searchContainerRef} className="bg-white rounded-2xl p-5 shadow-sm border border-border space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
-                <Search className="w-4 h-4 text-brand" />
-                <span>Instant Shade & SKU Search</span>
-                <span className="text-[11px] font-normal bg-gray-100 text-gray-600 border border-gray-200 px-1.5 py-0.5 rounded tabular-nums">
-                  F2
-                </span>
-              </h2>
-              <span className="text-xs text-gray-500">
-                Type shade code, brand or finish (e.g. <span className="tabular-nums text-brand font-semibold">"21094 suede"</span>)
-              </span>
-            </div>
-
-            {/* Autocomplete Input */}
-            <div className="relative">
+      {/* Main Workspace (2 columns on lg+) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        {/* Left Column: Search & Items Ledger (7 cols on lg, 8 on xl) */}
+        <div className="lg:col-span-7 xl:col-span-8 space-y-6">
+          {/* Hero Search Box */}
+          <div ref={searchContainerRef} className="relative">
+            <div className="relative flex items-center">
+              <label htmlFor="shade-search-input" className="sr-only">
+                Search shades, brand, finish or code
+              </label>
+              <div className="absolute left-4 pointer-events-none text-text-muted">
+                <Search className="w-4 h-4 stroke-[1.5]" />
+              </div>
               <input
-                aria-label="Search shades and SKUs"
-                aria-describedby="pos-shortcuts"
-                aria-keyshortcuts="F2"
+                id="shade-search-input"
+                ref={searchInputRef}
+                type="text"
                 role="combobox"
-                aria-autocomplete="list"
                 aria-expanded={searchResults.length > 0}
-                autoComplete="off"
-                aria-controls={searchResults.length ? 'sku-results' : undefined}
+                aria-controls="sku-results"
+                aria-autocomplete="list"
                 aria-activedescendant={activeResult >= 0 ? `sku-option-${activeResult}` : undefined}
+                autoComplete="off"
+                placeholder="Search a shade, brand or finish... (Press F2)"
+                value={searchQuery}
                 onKeyDown={(e) => {
                   if (e.nativeEvent.isComposing) return;
                   if (e.key === 'ArrowDown') {
@@ -616,273 +701,302 @@ export default function CounterBillingPage() {
                     setActiveResult(-1);
                   }
                 }}
-                ref={searchInputRef}
-                type="text"
-                placeholder="Search brand, shade code, finish or size... (Press F2)"
-                value={searchQuery}
                 onChange={(e) => {
                   setActiveResult(-1);
                   setSearchError('');
                   setIsSearching(Boolean(e.target.value.trim()));
                   setSearchQuery(e.target.value);
                 }}
-                className="w-full bg-surface border border-input-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-brand focus:bg-white text-gray-900 shadow-inner"
+                className="w-full h-12 bg-surface-sunken border border-border rounded-md pl-11 pr-14 text-sm text-text placeholder:text-text-faint focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:border-accent transition duration-150"
               />
-
-              <p id="pos-shortcuts" className="mt-2 text-xs text-gray-500">
-                <kbd className="font-semibold text-gray-700">F2</kbd> Search · <kbd className="font-semibold text-gray-700">↑ ↓</kbd> Choose · <kbd className="font-semibold text-gray-700">Enter</kbd> Select · <kbd className="font-semibold text-gray-700">Esc</kbd> Clear · <kbd className="font-semibold text-gray-700">Ctrl+Enter</kbd> Save &amp; Print
-              </p>
-              <p role="status" className="sr-only">
-                {isSearching ? 'Searching' : searchQuery && !searchError ? `${searchResults.length} suggestions` : ''}
-              </p>
-              {searchError && <p role="alert" className="mt-2 text-sm text-red-800">{searchError}</p>}
-              
-              {isSearching && (
-                <div role="status" className="mt-2 p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-600 flex items-center gap-2 animate-pulse">
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-brand" />
-                  <span>Searching catalog variants...</span>
-                </div>
-              )}
-
-              {searchQuery.trim() && !isSearching && !searchError && searchResults.length === 0 && (
-                <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">
-                  No matching variants found for <span className="font-bold">"{searchQuery}"</span>. Try searching by brand, finish, or code.
-                </div>
-              )}
-
-              {/* Autocomplete Dropdown */}
-              {searchResults.length > 0 && (
-                <div
-                  id="sku-results"
-                  role="listbox"
-                  aria-label="Matching variants"
-                  className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-30 max-h-72 overflow-y-auto divide-y divide-gray-100"
-                >
-                  {searchResults.map((v, index) => {
-                    const showroomStock = v.stockLedgers?.find((s) => s.location === 'Showroom')?.quantityOnHand || 0;
-                    const godownStock = v.stockLedgers?.find((s) => s.location === 'Godown')?.quantityOnHand || 0;
-
-                    return (
-                      <div
-                        key={v.id}
-                        id={`sku-option-${index}`}
-                        role="option"
-                        aria-selected={activeResult === index}
-                        onMouseDown={(event) => {
-                          event.preventDefault(); // Prevent input blur before click fires
-                          handleSelectVariant(v);
-                        }}
-                        className={`flex min-h-11 w-full cursor-pointer items-center justify-between gap-3 p-3 text-left text-sm transition ${
-                          activeResult === index ? 'bg-emerald-50 ring-2 ring-inset ring-emerald-600' : 'hover:bg-gray-50'
-                        }`}
-                      >
-                        <div>
-                          <div className="font-bold text-gray-900">
-                            {v.brand} - {v.designCode} ({v.designName})
-                          </div>
-                          <div className="text-[13px] text-gray-700 font-medium">
-                            {v.finish} | {v.thicknessMm}mm | {v.size} | {v.category}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-3 text-right">
-                          <div className="text-xs space-y-1">
-                            <div
-                              className={`px-2 py-0.5 rounded ${
-                                dispatchFrom === 'Godown'
-                                  ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300'
-                                  : 'text-gray-600'
-                              }`}
-                            >
-                              Godown: <span className="font-bold">{godownStock}</span>
-                            </div>
-                            <div
-                              className={`px-2 py-0.5 rounded ${
-                                dispatchFrom === 'Showroom'
-                                  ? 'bg-emerald-100 text-emerald-900 font-bold border border-emerald-300'
-                                  : 'text-gray-600'
-                              }`}
-                            >
-                              Showroom: <span className="font-bold">{showroomStock}</span>
-                            </div>
-                          </div>
-                          <div className="tabular-nums font-bold text-brand text-base">
-                            {formatINR(v.defaultSellingPrice)}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+              <div className="absolute right-3.5 flex items-center gap-1 pointer-events-none">
+                <kbd className="text-[11px] font-sans text-text-faint border border-border bg-surface px-1.5 py-0.5 rounded">
+                  F2
+                </kbd>
+              </div>
             </div>
 
-            {/* Selected Variant - Fast Keyboard Entry Form */}
-            {selectedVariant && (
-              <form onSubmit={handleAddItem} className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="font-bold text-emerald-950 text-base">
-                    {selectedVariant.brand} {selectedVariant.designCode} — {selectedVariant.designName}
-                  </div>
-                  <div className="text-xs text-brand font-medium">
-                    {selectedVariant.finish} • {selectedVariant.thicknessMm}mm • {selectedVariant.size}
-                  </div>
+            {/* Quiet Search State / Skeletons */}
+            {isSearching && (
+              <div
+                role="status"
+                className="absolute top-full left-0 right-0 mt-1 bg-surface border border-border rounded-md shadow-pop z-30 p-4 space-y-3"
+              >
+                <div className="flex items-center gap-2 text-xs text-text-muted">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-accent" />
+                  <span>Searching catalog...</span>
                 </div>
+                <div className="space-y-2 pt-1 animate-pulse">
+                  <div className="h-3.5 bg-surface-sunken rounded w-3/4"></div>
+                  <div className="h-2.5 bg-surface-sunken rounded w-1/2"></div>
+                </div>
+              </div>
+            )}
 
-                {isStockDeficit && (
-                  <div className="bg-amber-50 border border-amber-300 p-2.5 rounded-lg flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900">
-                    <div className="flex items-center gap-1.5 font-medium">
-                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                      <span>Warning: Only {selectedLocationStock} available in {dispatchFrom} (requested {parsedQty || 0}).</span>
-                    </div>
-                    <label className="flex items-center gap-1.5 cursor-pointer font-bold text-amber-950">
-                      <input
-                        type="checkbox"
-                        checked={allowOversell}
-                        onChange={(e) => setAllowOversell(e.target.checked)}
-                        className="w-4 h-4 text-emerald-600 rounded"
-                      />
-                      <span>Allow Oversell / Backorder</span>
-                    </label>
-                  </div>
-                )}
+            {searchError && (
+              <p role="alert" className="mt-2 text-xs text-danger-text">
+                {searchError}
+              </p>
+            )}
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1">
-                  <div>
-                    <label htmlFor="line-qty" className="text-xs font-semibold text-gray-600 block mb-1">
-                      Quantity ({selectedVariant.unit})
-                    </label>
-                    <input
-                      id="line-qty"
-                      ref={qtyInputRef}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.nativeEvent.isComposing) {
-                          e.preventDefault();
-                          rateInputRef.current?.focus();
-                          rateInputRef.current?.select();
-                        }
+            {searchQuery.trim() && !isSearching && !searchError && searchResults.length === 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-surface border border-border rounded-md shadow-pop z-30 p-4 text-xs text-text-muted">
+                No matching items found for “{searchQuery}”. Try searching by shade code or finish.
+              </div>
+            )}
+
+            {/* Results Dropdown */}
+            {searchResults.length > 0 && (
+              <div
+                id="sku-results"
+                role="listbox"
+                aria-label="Matching items"
+                className="absolute top-full left-0 right-0 mt-1.5 bg-surface border border-border rounded-md shadow-pop z-30 max-h-80 overflow-y-auto divide-y divide-border"
+              >
+                {searchResults.map((v, index) => {
+                  const showroomStock = v.stockLedgers?.find((s) => s.location === 'Showroom')?.quantityOnHand || 0;
+                  const godownStock = v.stockLedgers?.find((s) => s.location === 'Godown')?.quantityOnHand || 0;
+                  const isSelected = activeResult === index;
+
+                  return (
+                    <div
+                      key={v.id}
+                      id={`sku-option-${index}`}
+                      role="option"
+                      aria-selected={isSelected}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        handleSelectVariant(v);
                       }}
-                      type="number"
-                      min="1"
-                      value={itemQty}
-                      onChange={(e) => setItemQty(e.target.value)}
-                      onBlur={() => {
-                        if (!itemQty || parseFloat(itemQty) <= 0) setItemQty('1');
-                      }}
-                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm font-bold text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
-                    />
-                  </div>
-
-                  <div>
-                    <label htmlFor="line-rate" className="text-xs font-semibold text-gray-600 block mb-1">
-                      Selling Rate (₹)
-                    </label>
-                    <input
-                      type="number"
-                      ref={rateInputRef}
-                      id="line-rate"
-                      min="0"
-                      step="0.01"
-                      value={itemRate}
-                      onChange={(e) => setItemRate(Math.max(0, parseFloat(e.target.value) || 0))}
-                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm tabular-nums font-bold text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
-                    />
-                  </div>
-
-                  <div>
-                    <label htmlFor="pos-discount" className="text-xs font-semibold text-gray-600 block mb-1">
-                      Discount %
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      id="pos-discount"
-                      value={itemDiscount}
-                      onChange={(e) => setItemDiscount(Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
-                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm tabular-nums text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
-                    />
-                  </div>
-
-                  <div className="flex items-end">
-                    <button
-                      type="submit"
-                      className="w-full bg-brand hover:bg-brand-dark text-white font-semibold py-2 px-4 rounded-lg text-sm shadow transition flex items-center justify-center gap-1.5"
+                      className={`p-3.5 flex items-center justify-between gap-4 cursor-pointer transition duration-150 ${
+                        isSelected ? 'bg-accent-soft' : 'hover:bg-accent-soft/40'
+                      }`}
                     >
-                      <Plus className="w-4 h-4" />
-                      <span>Add to Bill</span>
-                    </button>
-                  </div>
-                </div>
-              </form>
+                      <div className="space-y-0.5 min-w-0">
+                        <div className="text-sm font-medium text-text truncate">
+                          {v.brand} · {v.designCode} · {v.designName}
+                        </div>
+                        <div className="text-[13px] text-text-muted">
+                          {v.finish} · {v.thicknessMm}mm · {v.size}
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0 space-y-1">
+                        <div className="text-sm font-medium text-text tabular-nums">
+                          {formatINR(v.defaultSellingPrice)}
+                        </div>
+                        <div className="text-xs text-text-muted flex items-center gap-1.5 justify-end">
+                          <span className={dispatchFrom === 'Godown' ? 'font-medium text-text' : 'text-text-faint'}>
+                            Godown {godownStock}
+                          </span>
+                          <span className="text-text-faint">·</span>
+                          <span className={dispatchFrom === 'Showroom' ? 'font-medium text-text' : 'text-text-faint'}>
+                            Showroom {showroomStock}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
 
-          {/* Line Items Table with Inline Editing */}
-          <div className="bg-white rounded-2xl shadow-sm border border-border overflow-hidden">
-            <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-gray-50/50">
-              <h3 className="font-bold text-gray-900 text-sm">
-                Billed Items ({cartItems.length})
-              </h3>
-              <span className="text-xs text-gray-500">Edit Quantity, Rate or Disc inline</span>
+          {/* Line Item Fast Entry Form (Soft slide-in when item chosen) */}
+          {selectedVariant && (
+            <form
+              onSubmit={handleAddItem}
+              className="bg-surface rounded-md border border-border p-4 space-y-3.5 transition-all duration-150"
+            >
+              <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border pb-2.5">
+                <div>
+                  <h3 className="font-serif text-base text-text font-normal">
+                    {selectedVariant.brand} {selectedVariant.designCode} — {selectedVariant.designName}
+                  </h3>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    {selectedVariant.finish} · {selectedVariant.thicknessMm}mm · {selectedVariant.size}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedVariant(null)}
+                  className="text-xs text-text-muted hover:text-text"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              {/* Soft Warning when stock deficit */}
+              {isStockDeficit && (
+                <div className="bg-warn-soft text-warn-text rounded-md p-3 text-xs flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 font-normal">
+                    <AlertTriangle className="w-3.5 h-3.5 stroke-[1.5] shrink-0" />
+                    <span>
+                      {selectedLocationStock} available in {dispatchFrom.toLowerCase()} (requested {parsedQty || 0}).
+                    </span>
+                  </div>
+                  <label className="flex items-center gap-1.5 cursor-pointer font-medium text-xs">
+                    <input
+                      type="checkbox"
+                      checked={allowOversell}
+                      onChange={(e) => setAllowOversell(e.target.checked)}
+                      className="rounded text-accent focus:ring-accent"
+                    />
+                    <span>Allow oversell / backorder</span>
+                  </label>
+                </div>
+              )}
+
+              {/* Inputs row */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1 items-end">
+                <div>
+                  <label htmlFor="line-qty" className="text-[13px] text-text-muted font-medium mb-1 block">
+                    Quantity ({selectedVariant.unit.toLowerCase()})
+                  </label>
+                  <input
+                    id="line-qty"
+                    ref={qtyInputRef}
+                    type="number"
+                    min="1"
+                    value={itemQty}
+                    onChange={(e) => setItemQty(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        rateInputRef.current?.focus();
+                        rateInputRef.current?.select();
+                      }
+                    }}
+                    onBlur={() => {
+                      if (!itemQty || parseFloat(itemQty) <= 0) setItemQty('1');
+                    }}
+                    className="w-full h-9 bg-surface-sunken border border-border rounded-md px-3 text-sm text-text tabular-nums font-medium focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:border-accent"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="line-rate" className="text-[13px] text-text-muted font-medium mb-1 block">
+                    Rate (₹)
+                  </label>
+                  <input
+                    id="line-rate"
+                    ref={rateInputRef}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={itemRate}
+                    onChange={(e) => setItemRate(Math.max(0, parseFloat(e.target.value) || 0))}
+                    className="w-full h-9 bg-surface-sunken border border-border rounded-md px-3 text-sm text-text tabular-nums font-medium focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:border-accent"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="line-discount" className="text-[13px] text-text-muted font-medium mb-1 block">
+                    Discount %
+                  </label>
+                  <input
+                    id="line-discount"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={itemDiscount}
+                    onChange={(e) =>
+                      setItemDiscount(Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))
+                    }
+                    className="w-full h-9 bg-surface-sunken border border-border rounded-md px-3 text-sm text-text tabular-nums focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:border-accent"
+                  />
+                </div>
+
+                <div>
+                  <button
+                    type="submit"
+                    className="w-full h-9 bg-accent hover:bg-accent-hover text-white text-xs sm:text-sm font-medium rounded-md flex items-center justify-center gap-1.5 transition duration-150"
+                  >
+                    <Plus className="w-3.5 h-3.5 stroke-[1.5]" />
+                    <span>Add to bill</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+          )}
+
+          {/* Items Ledger Table */}
+          <div className="space-y-3">
+            <div className="flex items-baseline justify-between border-b border-border pb-2">
+              <h2 className="font-serif text-lg text-text font-normal">
+                Items ({cartItems.length})
+              </h2>
+              {cartItems.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearCart}
+                  className="text-xs text-text-muted hover:text-danger-text transition duration-150"
+                >
+                  Clear all
+                </button>
+              )}
             </div>
 
             {cartItems.length === 0 ? (
-              <div className="p-12 text-center text-gray-400">
-                <Package className="w-12 h-12 mx-auto stroke-[1.2] mb-3 text-gray-300" />
-                <p className="font-medium text-sm">No items in the bill yet.</p>
-                <p className="text-xs text-gray-400 mt-1">Press <kbd className="bg-gray-100 text-gray-700 px-1 py-0.5 rounded text-[11px] tabular-nums">F2</kbd> to search and add laminates or hardware.</p>
+              <div className="py-12 text-center text-text-muted text-sm space-y-1">
+                <p>No items in this bill yet.</p>
+                <p className="text-xs text-text-faint">
+                  Press <kbd className="text-[11px] font-sans border border-border bg-surface px-1 py-0.5 rounded">F2</kbd> to search and add laminates or hardware.
+                </p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm min-w-[700px]">
-                  <thead className="bg-gray-100/75 text-gray-700 text-xs uppercase font-semibold border-b border-gray-200">
-                    <tr>
-                      <th className="py-3 px-4">#</th>
-                      <th className="py-3 px-4">Brand & Design</th>
-                      <th className="py-3 px-4">Finish / Thick</th>
-                      <th className="py-3 px-3 text-center">Qty</th>
-                      <th className="py-3 px-3 text-right">Rate (₹)</th>
-                      <th className="py-3 px-3 text-right">Disc %</th>
-                      <th className="py-3 px-4 text-right">Total</th>
-                      <th className="py-3 px-4 text-center">Action</th>
+              <div className="overflow-x-auto -mx-2 sm:mx-0">
+                <table className="w-full text-left text-sm min-w-[640px]">
+                  <thead>
+                    <tr className="text-xs text-text-muted uppercase tracking-wider border-b border-border font-medium">
+                      <th className={`px-3 ${density === 'compact' ? 'py-1.5' : 'py-2.5'} w-10`}>#</th>
+                      <th className={`px-3 ${density === 'compact' ? 'py-1.5' : 'py-2.5'}`}>Item</th>
+                      <th className={`px-2 ${density === 'compact' ? 'py-1.5' : 'py-2.5'} text-center w-24`}>Qty</th>
+                      <th className={`px-2 ${density === 'compact' ? 'py-1.5' : 'py-2.5'} text-right w-24`}>Rate (₹)</th>
+                      <th className={`px-2 ${density === 'compact' ? 'py-1.5' : 'py-2.5'} text-right w-20`}>Disc %</th>
+                      <th className={`px-3 ${density === 'compact' ? 'py-1.5' : 'py-2.5'} text-right w-28`}>Total</th>
+                      <th className={`px-2 ${density === 'compact' ? 'py-1.5' : 'py-2.5'} text-center w-12`}></th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-200">
+                  <tbody className="divide-y divide-border">
                     {cartItems.map((item, idx) => {
                       const qty = parseFloat(String(item.quantity)) || 0;
                       const lineGross = qty * Number(item.rate || 0);
                       const lineNet = lineGross - lineGross * (Number(item.discountPercent || 0) / 100);
 
                       return (
-                        <tr key={item.id} className="hover:bg-gray-50 transition">
-                          <td className="py-3 px-4 text-gray-400">{idx + 1}</td>
-                          <td className="py-3 px-4 font-bold text-gray-900">
-                            {item.variant.brand} {item.variant.designCode}
-                            <div className="text-xs text-gray-600 font-normal">{item.variant.designName}</div>
+                        <tr
+                          key={item.id}
+                          className="hover:bg-accent-soft/30 transition duration-150 group"
+                        >
+                          <td className={`px-3 ${density === 'compact' ? 'py-2' : 'py-3.5'} text-xs text-text-faint`}>
+                            {idx + 1}
                           </td>
-                          <td className="py-3 px-4 text-gray-700 text-[13px] font-medium">
-                            {item.variant.finish} | {item.variant.thicknessMm}mm
-                          </td>
-                          <td className="py-2 px-3 text-center">
-                            <div className="inline-flex items-center gap-1">
-                              <input
-                                type="number"
-                                min="0.01"
-                                step="any"
-                                value={item.quantity}
-                                onChange={(e) => handleUpdateCartItem(item.id, 'quantity', e.target.value)}
-                                onBlur={() => {
-                                  const val = parseFloat(String(item.quantity)) || 0;
-                                  if (val <= 0) handleUpdateCartItem(item.id, 'quantity', 1);
-                                }}
-                                aria-label={`Quantity for line ${idx + 1}: ${item.variant.designCode}`}
-                                className="w-16 bg-white border border-gray-300 rounded px-1.5 py-1 text-center text-sm font-bold text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand shadow-sm"
-                              />
-                              <span className="text-xs text-gray-500">{item.variant.unit}</span>
+                          <td className={`px-3 ${density === 'compact' ? 'py-2' : 'py-3.5'}`}>
+                            <div className="font-medium text-text">
+                              {item.variant.brand} · {item.variant.designCode}
+                            </div>
+                            <div className="text-[13px] text-text-muted mt-0.5">
+                              {item.variant.finish} · {item.variant.thicknessMm}mm · {item.variant.designName}
                             </div>
                           </td>
-                          <td className="py-2 px-3 text-right">
+                          <td className={`px-2 ${density === 'compact' ? 'py-2' : 'py-3.5'} text-center`}>
+                            <input
+                              type="number"
+                              min="0.01"
+                              step="any"
+                              value={item.quantity}
+                              onChange={(e) => handleUpdateCartItem(item.id, 'quantity', e.target.value)}
+                              onBlur={() => {
+                                const val = parseFloat(String(item.quantity)) || 0;
+                                if (val <= 0) handleUpdateCartItem(item.id, 'quantity', 1);
+                              }}
+                              aria-label={`Quantity for line ${idx + 1}`}
+                              className="w-16 h-8 text-center text-sm font-medium tabular-nums bg-surface-sunken border border-border rounded px-1 text-text focus-visible:border-accent"
+                            />
+                          </td>
+                          <td className={`px-2 ${density === 'compact' ? 'py-2' : 'py-3.5'} text-right`}>
                             <input
                               type="number"
                               min="0"
@@ -891,11 +1005,11 @@ export default function CounterBillingPage() {
                               onChange={(e) =>
                                 handleUpdateCartItem(item.id, 'rate', Math.max(0, parseFloat(e.target.value) || 0))
                               }
-                              aria-label={`Rate for line ${idx + 1}: ${item.variant.designCode}`}
-                              className="w-24 bg-white border border-gray-300 rounded px-1.5 py-1 text-right text-sm tabular-nums font-bold text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand shadow-sm"
+                              aria-label={`Rate for line ${idx + 1}`}
+                              className="w-20 h-8 text-right text-sm font-medium tabular-nums bg-surface-sunken border border-border rounded px-1.5 text-text focus-visible:border-accent"
                             />
                           </td>
-                          <td className="py-2 px-3 text-right">
+                          <td className={`px-2 ${density === 'compact' ? 'py-2' : 'py-3.5'} text-right`}>
                             <input
                               type="number"
                               min="0"
@@ -909,22 +1023,22 @@ export default function CounterBillingPage() {
                                   Math.min(100, Math.max(0, parseFloat(e.target.value) || 0))
                                 )
                               }
-                              aria-label={`Discount for line ${idx + 1}: ${item.variant.designCode}`}
-                              className="w-16 bg-white border border-gray-300 rounded px-1.5 py-1 text-right text-sm tabular-nums text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand shadow-sm"
+                              aria-label={`Discount for line ${idx + 1}`}
+                              className="w-14 h-8 text-right text-sm tabular-nums bg-surface-sunken border border-border rounded px-1 text-text-muted focus-visible:border-accent"
                             />
                           </td>
-                          <td className="py-3 px-4 text-right tabular-nums font-bold text-gray-900">
+                          <td className={`px-3 ${density === 'compact' ? 'py-2' : 'py-3.5'} text-right font-medium text-text tabular-nums`}>
                             {formatINR(lineNet)}
                           </td>
-                          <td className="py-3 px-4 text-center">
+                          <td className={`px-2 ${density === 'compact' ? 'py-2' : 'py-3.5'} text-center`}>
                             <button
                               type="button"
                               onClick={() => handleRemoveItem(item.id)}
                               aria-label={`Remove line ${idx + 1}: ${item.variant.brand} ${item.variant.designCode}`}
-                              title={`Remove line ${idx + 1}`}
-                              className="text-red-500 hover:text-red-700 inline-grid min-h-11 min-w-11 place-items-center rounded-lg hover:bg-red-50 transition"
+                              title="Remove item"
+                              className="w-7 h-7 rounded inline-flex items-center justify-center text-text-faint hover:text-danger-text hover:bg-danger-soft transition duration-150"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="w-3.5 h-3.5 stroke-[1.5]" />
                             </button>
                           </td>
                         </tr>
@@ -937,108 +1051,87 @@ export default function CounterBillingPage() {
           </div>
         </div>
 
-        {/* Right Column: Customer Combobox, Commission & Summary */}
-        <div className="space-y-6 lg:sticky lg:top-6">
-          {/* Party & Referrer Card */}
-          <div className="bg-white rounded-2xl p-5 shadow-sm border border-border space-y-4">
-            <h3 className="font-bold text-gray-900 text-base flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <UserCheck className="w-4 h-4 text-brand" />
-                <span>Customer &amp; Referrer</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setIsAddCustomerModalOpen(true)}
-                className="text-xs text-brand hover:text-brand-dark font-semibold flex items-center gap-1 bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-200 transition"
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>+ Add Customer</span>
-              </button>
-            </h3>
-
-            {/* Customer Searchable Combobox */}
-            <div ref={customerComboboxRef} className="relative">
-              <label htmlFor="customer-combobox-input" className="text-xs font-semibold text-gray-600 block mb-1">
-                Billed To (Customer / Contractor) <span className="text-red-500">*</span>
-              </label>
-
-              {selectedCustomer ? (
-                <div className="bg-surface border border-brand rounded-xl p-3 flex items-center justify-between">
-                  <div>
-                    <div className="font-bold text-gray-900 text-sm flex items-center gap-1.5">
-                      <Check className="w-4 h-4 text-emerald-600" />
-                      <span>{selectedCustomer.name}</span>
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      {selectedCustomer.phone} • {formatPartyType(selectedCustomer.partyType)} (State: {selectedCustomer.stateCode || '24'})
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedCustomerId('');
-                      setCustomerSearch('');
-                      setIsCustomerDropdownOpen(true);
-                    }}
-                    className="text-xs text-gray-500 hover:text-red-600 px-2 py-1 rounded hover:bg-gray-100 font-medium transition"
-                  >
-                    Change
-                  </button>
-                </div>
-              ) : (
-                <div className="relative">
-                  <input
-                    id="customer-combobox-input"
-                    type="text"
-                    role="combobox"
-                    aria-expanded={isCustomerDropdownOpen}
-                    aria-controls="customer-combobox-list"
-                    autoComplete="off"
-                    placeholder="Search name, phone or type..."
-                    value={customerSearch}
-                    onFocus={() => setIsCustomerDropdownOpen(true)}
-                    onChange={(e) => {
-                      setCustomerSearch(e.target.value);
-                      setIsCustomerDropdownOpen(true);
-                    }}
-                    className="w-full bg-surface border border-input-border rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand font-medium"
-                  />
-                  {customerSearch && (
-                    <button
-                      type="button"
-                      onClick={() => setCustomerSearch('')}
-                      className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* Combobox Dropdown */}
-              {!selectedCustomerId && isCustomerDropdownOpen && (
-                <div
-                  id="customer-combobox-list"
-                  role="listbox"
-                  className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-20 max-h-60 overflow-y-auto divide-y divide-gray-100"
+        {/* Right Column: Customer & Summary (One soft surface, sticky on lg+) */}
+        <div className="lg:col-span-5 xl:col-span-4 lg:sticky lg:top-6 self-start">
+          <div className="bg-surface rounded-lg border border-border p-5 space-y-6">
+            {/* Customer Section */}
+            <div className="space-y-3.5">
+              <div className="flex items-baseline justify-between border-b border-border pb-2">
+                <h2 className="font-serif text-lg text-text font-normal">Customer</h2>
+                <button
+                  type="button"
+                  onClick={() => setIsAddCustomerModalOpen(true)}
+                  className="text-xs text-accent hover:text-accent-hover font-medium flex items-center gap-1 transition"
                 >
-                  <div className="p-2 bg-gray-50 flex items-center justify-between text-xs text-gray-500 border-b border-gray-200">
-                    <span>{filteredCustomers.length} customers found</span>
+                  <UserPlus className="w-3 h-3 stroke-[1.5]" />
+                  <span>+ Add customer</span>
+                </button>
+              </div>
+
+              {/* Customer Searchable Combobox */}
+              <div ref={customerComboboxRef} className="relative">
+                {selectedCustomer ? (
+                  <div className="bg-surface-sunken border border-border rounded-md p-3 flex items-start justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <div className="text-sm font-medium text-text flex items-center gap-1.5">
+                        <Check className="w-3.5 h-3.5 text-accent stroke-[2]" />
+                        <span>{selectedCustomer.name}</span>
+                      </div>
+                      <div className="text-xs text-text-muted">
+                        {selectedCustomer.phone} · {formatPartyType(selectedCustomer.partyType)} (State {selectedCustomer.stateCode || '24'})
+                      </div>
+                    </div>
                     <button
                       type="button"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        setIsAddCustomerModalOpen(true);
-                        setIsCustomerDropdownOpen(false);
+                      onClick={() => {
+                        setSelectedCustomerId('');
+                        setCustomerSearch('');
+                        setIsCustomerDropdownOpen(true);
                       }}
-                      className="text-brand font-bold hover:underline"
+                      className="text-xs text-text-muted hover:text-text px-2 py-0.5 rounded transition"
                     >
-                      + Create New
+                      Change
                     </button>
                   </div>
-                  {filteredCustomers.length === 0 ? (
-                    <div className="p-4 text-center text-xs text-gray-500">
-                      No matching customer found.
+                ) : (
+                  <div className="relative">
+                    <input
+                      id="customer-combobox-input"
+                      type="text"
+                      role="combobox"
+                      aria-expanded={isCustomerDropdownOpen}
+                      aria-controls="customer-combobox-list"
+                      autoComplete="off"
+                      placeholder="Search customer name or phone..."
+                      value={customerSearch}
+                      onFocus={() => setIsCustomerDropdownOpen(true)}
+                      onChange={(e) => {
+                        setCustomerSearch(e.target.value);
+                        setIsCustomerDropdownOpen(true);
+                      }}
+                      className="w-full h-10 bg-surface-sunken border border-border rounded-md px-3 text-sm text-text placeholder:text-text-faint focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:border-accent"
+                    />
+                    {customerSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomerSearch('')}
+                        className="absolute right-3 top-2.5 text-text-muted hover:text-text"
+                      >
+                        <X className="w-4 h-4 stroke-[1.5]" />
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Combobox Dropdown */}
+                {!selectedCustomerId && isCustomerDropdownOpen && (
+                  <div
+                    id="customer-combobox-list"
+                    role="listbox"
+                    className="absolute top-full left-0 right-0 mt-1 bg-surface border border-border rounded-md shadow-pop z-20 max-h-60 overflow-y-auto divide-y divide-border"
+                  >
+                    <div className="p-2.5 bg-surface-sunken flex items-center justify-between text-xs text-text-muted border-b border-border">
+                      <span>{filteredCustomers.length} customers</span>
                       <button
                         type="button"
                         onMouseDown={(e) => {
@@ -1046,176 +1139,218 @@ export default function CounterBillingPage() {
                           setIsAddCustomerModalOpen(true);
                           setIsCustomerDropdownOpen(false);
                         }}
-                        className="block mx-auto mt-2 text-brand font-semibold"
+                        className="text-accent font-medium hover:underline"
                       >
-                        + Add "{customerSearch}" as customer
+                        + Create new
                       </button>
                     </div>
-                  ) : (
-                    filteredCustomers.map((c) => (
-                      <div
-                        key={c.id}
-                        role="option"
-                        aria-selected={selectedCustomerId === c.id}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          setSelectedCustomerId(c.id);
-                          setIsCustomerDropdownOpen(false);
-                          setErrorMessage(null);
-                        }}
-                        className="p-2.5 hover:bg-emerald-50 cursor-pointer text-sm flex items-center justify-between"
-                      >
-                        <div>
-                          <div className="font-bold text-gray-900">{c.name}</div>
-                          <div className="text-xs text-gray-500">
-                            {c.phone} • {formatPartyType(c.partyType)}
-                          </div>
-                        </div>
-                        <span className="text-[11px] tabular-nums text-gray-400">
-                          State: {c.stateCode || '24'}
-                        </span>
+
+                    {filteredCustomers.length === 0 ? (
+                      <div className="p-4 text-center text-xs text-text-muted">
+                        No matching customer.
+                        <button
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setIsAddCustomerModalOpen(true);
+                            setIsCustomerDropdownOpen(false);
+                          }}
+                          className="block mx-auto mt-2 text-accent font-medium"
+                        >
+                          + Add "{customerSearch}"
+                        </button>
                       </div>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Carpenter / Architect Referrer Dropdown */}
-            <div>
-              <label htmlFor="pos-referrer" className="text-xs font-semibold text-gray-600 block mb-1">
-                Tag Carpenter / Architect (Optional)
-              </label>
-              <select
-                id="pos-referrer"
-                value={selectedReferrerId}
-                onChange={(e) => setSelectedReferrerId(e.target.value)}
-                className="w-full bg-surface border border-input-border rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
-              >
-                <option value="">No Referrer</option>
-                {referrers.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name} ({r.phone}) — {formatPartyType(r.partyType)} ({r.defaultCommissionPercent != null ? `${r.defaultCommissionPercent}% comm.` : '0% comm.'})
-                  </option>
-                ))}
-              </select>
-
-              {/* Live Commission Calculation Preview */}
-              {selectedReferrer && subtotal > 0 && (
-                <div className="mt-2 bg-amber-50 border border-amber-200 rounded-lg p-2.5 text-xs text-amber-900 flex justify-between items-center">
-                  <span>Commission ({commissionPercent}%):</span>
-                  <span className="tabular-nums font-bold text-amber-800">{formatINR(estimatedCommission)}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Bill Notes */}
-            <div>
-              <label htmlFor="pos-notes" className="text-xs font-semibold text-gray-600 block mb-1">
-                Remarks / Site Address
-              </label>
-              <textarea
-                id="pos-notes"
-                rows={2}
-                placeholder="e.g. Deliver to Villa 42, Bopal site"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="w-full bg-surface border border-input-border rounded-xl p-2.5 text-xs text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
-              />
-            </div>
-          </div>
-
-          {/* Payment & Bill Totals Card */}
-          <div className="bg-white rounded-2xl p-5 shadow-sm border border-border space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-bold text-gray-900 text-base">
-                Summary & Totals
-              </h3>
-              <span className="text-[11px] text-gray-400 italic">Preview only</span>
-            </div>
-
-            <div className="space-y-2 text-sm border-b border-gray-200 pb-4">
-              <div className="flex justify-between text-gray-600">
-                <span>Subtotal (Taxable Net):</span>
-                <span className="tabular-nums font-semibold text-gray-900">{formatINR(subtotal)}</span>
-              </div>
-              {docType === 'Estimate' ? (
-                <div className="flex justify-between text-gray-500 text-xs italic">
-                  <span>GST (Quotation):</span>
-                  <span className="tabular-nums">Tax Free (₹0.00)</span>
-                </div>
-              ) : isSameState ? (
-                <>
-                  <div className="flex justify-between text-gray-600 text-xs">
-                    <span>CGST (Intra-state):</span>
-                    <span className="tabular-nums">{formatINR(totalCgst)}</span>
+                    ) : (
+                      filteredCustomers.map((c) => (
+                        <div
+                          key={c.id}
+                          role="option"
+                          aria-selected={selectedCustomerId === c.id}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setSelectedCustomerId(c.id);
+                            setIsCustomerDropdownOpen(false);
+                            setErrorMessage(null);
+                          }}
+                          className="p-2.5 hover:bg-accent-soft/40 cursor-pointer text-sm flex items-center justify-between transition duration-150"
+                        >
+                          <div>
+                            <div className="font-medium text-text">{c.name}</div>
+                            <div className="text-xs text-text-muted">
+                              {c.phone} · {formatPartyType(c.partyType)}
+                            </div>
+                          </div>
+                          <span className="text-[11px] text-text-faint font-mono">
+                            State {c.stateCode || '24'}
+                          </span>
+                        </div>
+                      ))
+                    )}
                   </div>
-                  <div className="flex justify-between text-gray-600 text-xs">
-                    <span>SGST (Intra-state):</span>
-                    <span className="tabular-nums">{formatINR(totalSgst)}</span>
-                  </div>
-                </>
-              ) : (
-                <div className="flex justify-between text-gray-600 text-xs">
-                  <span>IGST (Inter-state - {selectedCustomer?.stateCode || 'Out of state'}):</span>
-                  <span className="tabular-nums">{formatINR(totalIgst)}</span>
-                </div>
-              )}
-              <div className="flex justify-between items-center pt-2 text-lg font-black text-gray-900">
-                <span>Grand Total:</span>
-                <span className="tabular-nums text-brand text-xl">{formatINR(grandTotal)}</span>
+                )}
               </div>
-            </div>
 
-            {userNotification && (
-              <div className="bg-emerald-50 border border-emerald-200 text-brand-dark text-xs p-3 rounded-xl font-medium">
-                {userNotification}
-              </div>
-            )}
-
-            {partyError && (
-              <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-xl text-xs flex items-center justify-between gap-2">
-                <span role="alert">{partyError}</span>
-                <button
-                  type="button"
-                  onClick={loadParties}
-                  disabled={partiesLoading}
-                  className="flex items-center gap-1 bg-red-100 hover:bg-red-200 text-red-800 px-2.5 py-1 rounded-lg font-semibold text-xs transition shrink-0"
+              {/* Tag Referrer (Carpenter / Architect) */}
+              <div>
+                <label htmlFor="pos-referrer" className="text-xs text-text-muted font-normal block mb-1">
+                  Tag architect or carpenter (optional)
+                </label>
+                <select
+                  id="pos-referrer"
+                  value={selectedReferrerId}
+                  onChange={(e) => setSelectedReferrerId(e.target.value)}
+                  className="w-full h-9 bg-surface-sunken border border-border rounded-md px-2.5 text-xs text-text focus-visible:ring-2 focus-visible:ring-accent/40"
                 >
-                  <RefreshCw className={`w-3 h-3 ${partiesLoading ? 'animate-spin' : ''}`} />
-                  <span>Retry</span>
-                </button>
-              </div>
-            )}
+                  <option value="">No referrer</option>
+                  {referrers.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name} ({r.phone}) — {formatPartyType(r.partyType)}{' '}
+                      {r.defaultCommissionPercent != null ? `(${r.defaultCommissionPercent}% comm.)` : ''}
+                    </option>
+                  ))}
+                </select>
 
-            {errorMessage && (
-              <div className="bg-red-50 text-red-700 text-xs p-3 rounded-xl border border-red-200 font-medium flex items-center gap-2">
-                <ShieldAlert className="w-4 h-4 shrink-0" />
-                <span role="alert">{errorMessage}</span>
+                {/* Soft Commission preview note */}
+                {selectedReferrer && subtotal > 0 && (
+                  <div className="mt-2 bg-warn-soft text-warn-text rounded-md px-3 py-2 text-xs flex justify-between items-center border border-warn-text/10">
+                    <span>Commission ({commissionPercent}%)</span>
+                    <span className="tabular-nums font-medium">{formatINR(estimatedCommission)}</span>
+                  </div>
+                )}
               </div>
-            )}
 
-            {/* Save & Print Action Button */}
-            <button
-              onClick={handleSubmit}
-              aria-keyshortcuts="Control+Enter Meta+Enter"
-              disabled={isSubmitting || cartItems.length === 0}
-              className={`w-full py-3.5 px-6 rounded-xl text-white font-bold text-base shadow-md transition flex items-center justify-center gap-2 ${
-                cartItems.length === 0 || isSubmitting
-                  ? 'bg-gray-400 cursor-not-allowed'
-                  : 'bg-brand hover:bg-brand-dark'
-              }`}
-            >
-              <Printer className="w-5 h-5" />
-              <span>
-                {isSubmitting ? 'Creating...' : `Save & Print ${docType.replace('_', ' ')}`}
-              </span>
-              <kbd className="hidden sm:inline-block text-[11px] bg-black/20 text-white px-2 py-0.5 rounded tabular-nums font-normal">
-                Ctrl+Enter
-              </kbd>
-            </button>
+              {/* Remarks / Site Address */}
+              <div>
+                <label htmlFor="pos-notes" className="text-xs text-text-muted font-normal block mb-1">
+                  Remarks or site address
+                </label>
+                <textarea
+                  id="pos-notes"
+                  rows={2}
+                  placeholder="e.g. Delivery to Villa 42, Bopal site"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full bg-surface-sunken border border-border rounded-md p-2.5 text-xs text-text placeholder:text-text-faint focus-visible:ring-2 focus-visible:ring-accent/40"
+                />
+              </div>
+            </div>
+
+            {/* Summary & Totals Section */}
+            <div className="space-y-4 pt-2">
+              <h2 className="font-serif text-lg text-text font-normal border-b border-border pb-2">
+                Summary
+              </h2>
+
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between text-text-muted">
+                  <span>Subtotal (taxable)</span>
+                  <span className="tabular-nums font-medium text-text">{formatINR(subtotal)}</span>
+                </div>
+
+                {docType === 'Estimate' ? (
+                  <div className="flex justify-between text-text-faint text-xs italic">
+                    <span>GST (Quotation)</span>
+                    <span className="tabular-nums">Tax free (₹0.00)</span>
+                  </div>
+                ) : isSameState ? (
+                  <>
+                    <div className="flex justify-between text-text-muted text-xs">
+                      <span>CGST (Intra-state)</span>
+                      <span className="tabular-nums">{formatINR(totalCgst)}</span>
+                    </div>
+                    <div className="flex justify-between text-text-muted text-xs">
+                      <span>SGST (Intra-state)</span>
+                      <span className="tabular-nums">{formatINR(totalSgst)}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex justify-between text-text-muted text-xs">
+                    <span>IGST ({selectedCustomer?.stateCode ? `State ${selectedCustomer.stateCode}` : 'Inter-state'})</span>
+                    <span className="tabular-nums">{formatINR(totalIgst)}</span>
+                  </div>
+                )}
+
+                {/* Grand Total Hairline */}
+                <div className="border-t border-border pt-3 mt-3 flex justify-between items-baseline">
+                  <span className="font-serif text-lg text-text">Total</span>
+                  <span className="font-serif text-2xl sm:text-3xl text-accent tabular-nums tracking-tight font-normal">
+                    {formatINR(grandTotal)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Feedback Alerts */}
+              {userNotification && (
+                <div role="status" aria-live="polite" className="bg-accent-soft text-accent text-xs p-3 rounded-md font-medium">
+                  {userNotification}
+                </div>
+              )}
+
+              {partyError && (
+                <div role="alert" className="bg-danger-soft text-danger-text p-3 rounded-md text-xs flex items-center justify-between gap-2">
+                  <span>{partyError}</span>
+                  <button
+                    type="button"
+                    onClick={loadParties}
+                    disabled={partiesLoading}
+                    className="underline font-medium hover:opacity-80"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+
+              {errorMessage && (
+                <div role="alert" className="bg-danger-soft text-danger-text text-xs p-3 rounded-md font-normal flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 shrink-0 stroke-[1.5]" />
+                  <span>{errorMessage}</span>
+                </div>
+              )}
+
+              {/* Primary Action Button */}
+              <button
+                type="button"
+                onClick={handleSubmit}
+                aria-keyshortcuts="Control+Enter Meta+Enter"
+                disabled={isSubmitting || cartItems.length === 0}
+                className={`w-full h-12 rounded-md text-sm font-medium transition duration-150 flex items-center justify-center gap-2 ${
+                  cartItems.length === 0 || isSubmitting
+                    ? 'bg-surface-sunken text-text-muted/60 border border-border cursor-not-allowed'
+                    : 'bg-accent hover:bg-accent-hover text-white'
+                }`}
+              >
+                <Printer className="w-4 h-4 stroke-[1.5]" />
+                <span>{isSubmitting ? 'Saving...' : docActionLabel}</span>
+                <kbd className="hidden sm:inline-block text-[11px] font-sans bg-white/20 text-white px-1.5 py-0.5 rounded ml-1 font-normal">
+                  Ctrl+Enter
+                </kbd>
+              </button>
+            </div>
           </div>
         </div>
+      </div>
+
+      {/* Pinned Mobile Bottom Bar */}
+      <div className="fixed bottom-0 left-0 right-0 p-3 bg-surface border-t border-border shadow-pop z-30 lg:hidden flex items-center justify-between gap-3">
+        <div>
+          <span className="text-[11px] text-text-muted uppercase block">Total</span>
+          <span className="font-serif text-lg text-accent tabular-nums font-normal">
+            {formatINR(grandTotal)}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={isSubmitting || cartItems.length === 0}
+          className={`h-11 px-5 rounded-md text-xs font-medium transition duration-150 flex items-center gap-1.5 ${
+            cartItems.length === 0 || isSubmitting
+              ? 'bg-surface-sunken text-text-muted border border-border cursor-not-allowed'
+              : 'bg-accent text-white hover:bg-accent-hover'
+          }`}
+        >
+          <Printer className="w-4 h-4 stroke-[1.5]" />
+          <span>{isSubmitting ? 'Saving...' : 'Save & print'}</span>
+        </button>
       </div>
 
       {/* Quick Add Customer Modal */}
@@ -1224,33 +1359,32 @@ export default function CounterBillingPage() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="add-customer-title"
-          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
         >
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-200 space-y-4">
-            <div className="flex items-center justify-between border-b pb-3">
-              <h3 id="add-customer-title" className="text-base font-bold text-gray-900 flex items-center gap-2">
-                <UserPlus className="w-5 h-5 text-brand" />
-                <span>Add New Customer / Contractor</span>
+          <div className="bg-surface rounded-lg max-w-md w-full p-6 shadow-pop border border-border space-y-4">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h3 id="add-customer-title" className="font-serif text-lg font-normal text-text">
+                Add new customer
               </h3>
               <button
                 type="button"
                 onClick={() => setIsAddCustomerModalOpen(false)}
-                className="text-gray-400 hover:text-gray-600 rounded-lg p-1"
+                className="text-text-muted hover:text-text rounded p-1"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4 stroke-[1.5]" />
               </button>
             </div>
 
             {partyCreateError && (
-              <div role="alert" className="p-3 bg-red-50 text-red-700 text-xs rounded-xl border border-red-200">
+              <div role="alert" className="p-3 bg-danger-soft text-danger-text text-xs rounded-md">
                 {partyCreateError}
               </div>
             )}
 
-            <form onSubmit={handleCreateCustomer} className="space-y-3">
+            <form onSubmit={handleCreateCustomer} className="space-y-3.5">
               <div>
-                <label htmlFor="new-cust-name" className="text-xs font-semibold text-gray-700 block mb-1">
-                  Full Name <span className="text-red-500">*</span>
+                <label htmlFor="new-cust-name" className="text-xs font-medium text-text-muted block mb-1">
+                  Full name <span className="text-danger-text">*</span>
                 </label>
                 <input
                   id="new-cust-name"
@@ -1259,13 +1393,13 @@ export default function CounterBillingPage() {
                   placeholder="e.g. Ramesh Patel"
                   value={newCustName}
                   onChange={(e) => setNewCustName(e.target.value)}
-                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
+                  className="w-full h-9 bg-surface-sunken border border-border rounded-md px-3 text-sm text-text focus-visible:border-accent"
                 />
               </div>
 
               <div>
-                <label htmlFor="new-cust-phone" className="text-xs font-semibold text-gray-700 block mb-1">
-                  Phone Number <span className="text-red-500">*</span>
+                <label htmlFor="new-cust-phone" className="text-xs font-medium text-text-muted block mb-1">
+                  Phone number <span className="text-danger-text">*</span>
                 </label>
                 <input
                   id="new-cust-phone"
@@ -1274,29 +1408,29 @@ export default function CounterBillingPage() {
                   placeholder="e.g. 9825012345"
                   value={newCustPhone}
                   onChange={(e) => setNewCustPhone(e.target.value)}
-                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
+                  className="w-full h-9 bg-surface-sunken border border-border rounded-md px-3 text-sm text-text focus-visible:border-accent"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="new-cust-type" className="text-xs font-semibold text-gray-700 block mb-1">
-                    Party Type
+                  <label htmlFor="new-cust-type" className="text-xs font-medium text-text-muted block mb-1">
+                    Party type
                   </label>
                   <select
                     id="new-cust-type"
                     value={newCustType}
                     onChange={(e) => setNewCustType(e.target.value)}
-                    className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
+                    className="w-full h-9 bg-surface-sunken border border-border rounded-md px-2 text-xs text-text focus-visible:border-accent"
                   >
-                    <option value="Retail_Customer">Retail Customer</option>
+                    <option value="Retail_Customer">Retail customer</option>
                     <option value="Contractor">Contractor</option>
                   </select>
                 </div>
 
                 <div>
-                  <label htmlFor="new-cust-state" className="text-xs font-semibold text-gray-700 block mb-1">
-                    State Code (GST)
+                  <label htmlFor="new-cust-state" className="text-xs font-medium text-text-muted block mb-1">
+                    State code
                   </label>
                   <input
                     id="new-cust-state"
@@ -1305,14 +1439,14 @@ export default function CounterBillingPage() {
                     placeholder="24"
                     value={newCustState}
                     onChange={(e) => setNewCustState(e.target.value)}
-                    className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
+                    className="w-full h-9 bg-surface-sunken border border-border rounded-md px-3 text-sm text-text tabular-nums focus-visible:border-accent"
                   />
                 </div>
               </div>
 
               <div>
-                <label htmlFor="new-cust-gstin" className="text-xs font-semibold text-gray-700 block mb-1">
-                  GSTIN (Optional)
+                <label htmlFor="new-cust-gstin" className="text-xs font-medium text-text-muted block mb-1">
+                  GSTIN (optional)
                 </label>
                 <input
                   id="new-cust-gstin"
@@ -1320,7 +1454,7 @@ export default function CounterBillingPage() {
                   placeholder="e.g. 24AAACG1234F1Z5"
                   value={newCustGstin}
                   onChange={(e) => setNewCustGstin(e.target.value.toUpperCase())}
-                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm uppercase text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus:border-brand"
+                  className="w-full h-9 bg-surface-sunken border border-border rounded-md px-3 text-sm uppercase text-text focus-visible:border-accent"
                 />
               </div>
 
@@ -1328,16 +1462,16 @@ export default function CounterBillingPage() {
                 <button
                   type="button"
                   onClick={() => setIsAddCustomerModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 hover:bg-gray-100"
+                  className="px-3.5 py-2 rounded-md text-xs text-text-muted hover:text-text transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingParty}
-                  className="px-5 py-2 rounded-xl text-xs font-bold bg-brand hover:bg-brand-dark text-white shadow transition"
+                  className="px-4 py-2 rounded-md text-xs font-medium bg-accent hover:bg-accent-hover text-white transition"
                 >
-                  {isSavingParty ? 'Saving...' : 'Save & Select Customer'}
+                  {isSavingParty ? 'Saving...' : 'Save & select customer'}
                 </button>
               </div>
             </form>

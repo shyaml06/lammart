@@ -1,16 +1,20 @@
 import type { Metadata } from 'next';
-import { Inter, Space_Grotesk } from 'next/font/google';
+import { Inter, Newsreader } from 'next/font/google';
 import './globals.css';
 import Navigation from '@/components/Navigation';
 
 const inter = Inter({
   subsets: ['latin'],
-  variable: '--font-inter',
+  variable: '--font-sans',
+  display: 'swap',
 });
 
-const spaceGrotesk = Space_Grotesk({
+const newsreader = Newsreader({
   subsets: ['latin'],
-  variable: '--font-space-grotesk',
+  variable: '--font-serif',
+  weight: ['400', '500'],
+  style: ['normal', 'italic'],
+  display: 'swap',
 });
 
 export const metadata: Metadata = {
@@ -24,10 +28,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${inter.variable} ${spaceGrotesk.variable}`}>
-      <body className="min-h-screen bg-[#FAF8F4] flex flex-col font-sans antialiased text-[#14201B]">
+    <html lang="en" className={`${inter.variable} ${newsreader.variable}`}>
+      <body className="min-h-screen bg-bg text-text font-sans antialiased flex flex-col selection:bg-accent-soft selection:text-accent">
+        <a className="skip-link" href="#main-content">Skip to main content</a>
         <Navigation />
-        <main className="flex-1 max-w-[1500px] w-full mx-auto p-4 md:p-6">
+        <main id="main-content" tabIndex={-1} className="flex-1 max-w-[1280px] w-full mx-auto px-4 sm:px-6 py-6 md:py-8">
           {children}
         </main>
       </body>
