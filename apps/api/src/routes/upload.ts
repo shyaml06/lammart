@@ -46,7 +46,10 @@ router.post('/', requireAuth, upload.single('image'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No image file provided' });
   }
-  res.json({ url: `/uploads/${req.file.filename}` });
+  res.json({
+    url: `/uploads/${req.file.filename}`,
+    file: { filename: req.file.filename, url: `/uploads/${req.file.filename}` },
+  });
 });
 
 export default router;

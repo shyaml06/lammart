@@ -208,7 +208,12 @@ export default function ItemsMasterPage() {
         throw new Error(data?.error || 'Upload failed');
       }
 
-      setFormImageUrl(data.file.url);
+      const uploadedUrl = data?.url || data?.file?.url;
+      if (!uploadedUrl) {
+        throw new Error('No image URL returned by server');
+      }
+
+      setFormImageUrl(uploadedUrl);
       showNotification('Image uploaded successfully!');
     } catch (err: any) {
       showNotification(err.message || 'Image upload failed', 'error');
