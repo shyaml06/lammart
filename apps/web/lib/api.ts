@@ -8,12 +8,16 @@ const API_BASE = '/api/v1';
 // In-memory token storage (with localStorage fallback for demo/convenience)
 export function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
-  return localStorage.getItem('lammart_token') || 'demo-token';
+  return localStorage.getItem('lammart_token') || null;
 }
 
-export function setAuthToken(token: string) {
+export function setAuthToken(token: string | null) {
   if (typeof window !== 'undefined') {
-    localStorage.setItem('lammart_token', token);
+    if (token) {
+      localStorage.setItem('lammart_token', token);
+    } else {
+      localStorage.removeItem('lammart_token');
+    }
   }
 }
 
@@ -22,7 +26,7 @@ let loginPromise: Promise<string | null> | null = null;
 export async function ensureToken(): Promise<string | null> {
   if (typeof window === 'undefined') return null;
   const existing = localStorage.getItem('lammart_token');
-  if (existing && existing !== 'demo-token') return existing;
+  if (existing) return existing;
 
   if (!loginPromise) {
     loginPromise = fetch(`${API_BASE}/auth/login`, {
@@ -34,11 +38,14 @@ export async function ensureToken(): Promise<string | null> {
       .then((d) => {
         if (d?.token) {
           setAuthToken(d.token);
+          if (d.user) {
+            localStorage.setItem('lammart_user', JSON.stringify(d.user));
+          }
           return d.token;
         }
-        return 'demo-token';
+        return null;
       })
-      .catch(() => 'demo-token')
+      .catch(() => null)
       .finally(() => {
         loginPromise = null;
       });
@@ -51,8 +58,8 @@ export async function apiRequest<T = any>(
   options: RequestInit = {}
 ): Promise<T> {
   let token = getAuthToken();
-  if (!token || token === 'demo-token') {
-    token = (await ensureToken()) || 'demo-token';
+  if (!token) {
+    token = await ensureToken();
   }
 
   const headers: Record<string, string> = {
@@ -72,6 +79,10 @@ export async function apiRequest<T = any>(
   const data = await res.json().catch(() => null);
 
   if (!res.ok) {
+    if (res.status === 401 && typeof window !== 'undefined') {
+      localStorage.removeItem('lammart_token');
+      localStorage.removeItem('lammart_user');
+    }
     throw new Error(data?.error || `Request failed with status ${res.status}`);
   }
 

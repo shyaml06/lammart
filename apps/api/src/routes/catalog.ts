@@ -18,15 +18,20 @@ const router = Router();
 
 // ── GET /variants — search & filter ─────────────
 // Quick search:  ?q=21094+suede+1mm
-// Filters:       ?brand=Merino&category=Laminate&finish=Matte
+// Filters:       ?brand=Merino&category=Laminate&finish=Matte&status=all
 router.get('/variants', requireAuth, async (req, res) => {
   try {
-    const { q, brand, category, finish, page = '1', limit = '50' } = req.query;
+    const { q, brand, category, finish, status, page = '1', limit = '50' } = req.query;
     const pageNum = Math.max(1, Number(page));
     const limitNum = Math.min(200, Math.max(1, Number(limit)));
     const skip = (pageNum - 1) * limitNum;
 
-    const where: any = { isActive: true };
+    const where: any = {};
+    if (status === 'inactive') {
+      where.isActive = false;
+    } else if (status !== 'all') {
+      where.isActive = true;
+    }
 
     // Full-text-style search across brand + designCode + designName + finish
     if (q) {
@@ -84,10 +89,10 @@ router.post('/variants', requireAuth, requireRole('Admin_Owner'), async (req, re
   try {
     const { brand, category, designCode, designName, finish, thicknessMm,
             size, hsnCode, gstRate, basePurchasePrice, defaultSellingPrice,
-            unit, sheetsPerBox, reorderLevel } = req.body;
+            unit, sheetsPerBox, reorderLevel, imageUrl, showroomStock, godownStock } = req.body;
 
     if (!brand || !designCode || !designName) {
-      return res.status(400).json({ error: 'brand, designCode, designName are required' });
+      return res.status(400).json({ error: 'brand, designCode, and designName are required' });
     }
 
     const variant = await prisma.productVariant.create({
@@ -100,14 +105,15 @@ router.post('/variants', requireAuth, requireRole('Admin_Owner'), async (req, re
         defaultSellingPrice: defaultSellingPrice || 0,
         unit: unit || 'Sheet', sheetsPerBox: sheetsPerBox || null,
         reorderLevel: reorderLevel ?? 5,
+        imageUrl: imageUrl || null,
       },
     });
 
-    // Create stock ledger entries for both locations (start at 0)
+    // Create stock ledger entries for both locations
     await prisma.stockLedger.createMany({
       data: [
-        { variantId: variant.id, location: 'Showroom' },
-        { variantId: variant.id, location: 'Godown' },
+        { variantId: variant.id, location: 'Showroom', quantityOnHand: Number(showroomStock) || 0 },
+        { variantId: variant.id, location: 'Godown', quantityOnHand: Number(godownStock) || 0 },
       ],
     });
 
@@ -131,7 +137,7 @@ router.put('/variants/:id', requireAuth, requireRole('Admin_Owner'), async (req,
   try {
     const data: any = {};
     const fields = ['brand', 'designCode', 'designName', 'finish', 'size',
-                    'hsnCode', 'unit', 'category'] as const;
+                    'hsnCode', 'unit', 'category', 'imageUrl'] as const;
     for (const f of fields) if (req.body[f] !== undefined) data[f] = req.body[f];
 
     const decimals = ['thicknessMm', 'gstRate', 'basePurchasePrice', 'defaultSellingPrice'] as const;
@@ -148,17 +154,53 @@ router.put('/variants/:id', requireAuth, requireRole('Admin_Owner'), async (req,
       data,
       include: { stockLedgers: true },
     });
-    res.json({ data: variant });
+
+    // Update stock if showroomStock or godownStock provided
+    if (req.body.showroomStock !== undefined) {
+      await prisma.stockLedger.upsert({
+        where: { variantId_location: { variantId: id, location: 'Showroom' } },
+        update: { quantityOnHand: Number(req.body.showroomStock) || 0 },
+        create: { variantId: id, location: 'Showroom', quantityOnHand: Number(req.body.showroomStock) || 0 },
+      });
+    }
+    if (req.body.godownStock !== undefined) {
+      await prisma.stockLedger.upsert({
+        where: { variantId_location: { variantId: id, location: 'Godown' } },
+        update: { quantityOnHand: Number(req.body.godownStock) || 0 },
+        create: { variantId: id, location: 'Godown', quantityOnHand: Number(req.body.godownStock) || 0 },
+      });
+    }
+
+    const updated = await prisma.productVariant.findUnique({
+      where: { id },
+      include: { stockLedgers: true },
+    });
+
+    res.json({ data: updated });
   } catch (error) {
     console.error('Update variant error:', error);
     res.status(500).json({ error: 'Failed to update variant' });
   }
 });
 
-// ── DELETE /variants/:id — soft-deactivate ──────
+// ── DELETE /variants/:id — deactivate or hard delete ──────
 router.delete('/variants/:id', requireAuth, requireRole('Admin_Owner'), async (req, res) => {
   try {
     const id = req.params.id as string;
+    const hard = req.query.hard === 'true';
+
+    if (hard) {
+      const lineCount = await prisma.transactionLineItem.count({ where: { variantId: id } });
+      if (lineCount > 0) {
+        await prisma.productVariant.update({ where: { id }, data: { isActive: false } });
+        return res.json({ success: true, message: 'Variant has past transaction history, marked as inactive/out-of-stock.' });
+      }
+      await prisma.stockLedger.deleteMany({ where: { variantId: id } });
+      await prisma.stockMovement.deleteMany({ where: { variantId: id } });
+      await prisma.productVariant.delete({ where: { id } });
+      return res.json({ success: true, message: 'Variant removed permanently.' });
+    }
+
     await prisma.productVariant.update({
       where: { id },
       data: { isActive: false },

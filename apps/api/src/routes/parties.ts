@@ -110,4 +110,24 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// DELETE /parties/:id
+router.delete('/:id', async (req, res) => {
+  try {
+    const id = req.params.id as string;
+    const txCount = await prisma.transaction.count({
+      where: { OR: [{ customerId: id }, { referrerId: id }] },
+    });
+    if (txCount > 0) {
+      return res.status(400).json({
+        error: `Cannot delete party: they have ${txCount} transaction(s) recorded in the ledger.`,
+      });
+    }
+    await prisma.party.delete({ where: { id } });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Delete party error:', error);
+    res.status(500).json({ error: 'Failed to delete party' });
+  }
+});
+
 export default router;

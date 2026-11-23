@@ -86,6 +86,7 @@ export default function PendingChallansPage() {
       });
 
       setCreatedInvoice(res.data);
+      setSelectedChallanIds([]);
       loadChallans(); // Refresh list
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to convert challans');
@@ -157,7 +158,7 @@ export default function PendingChallansPage() {
       {errorMsg && (
         <div className="bg-red-50 border border-red-200 text-red-700 p-3.5 rounded-xl text-xs flex items-center gap-2 font-medium">
           <AlertCircle className="w-4 h-4 shrink-0" />
-          <span>{errorMsg}</span>
+          <span role="alert">{errorMsg}</span>
         </div>
       )}
 
@@ -189,7 +190,7 @@ export default function PendingChallansPage() {
               </div>
 
               {/* Table of Challans for this customer */}
-              <div className="overflow-x-auto">
+              <div role="region" aria-label="Challans table; scroll for more columns" tabIndex={0} className="table-scroll">
                 <table className="w-full text-left text-sm">
                   <thead className="text-xs uppercase font-semibold text-gray-600 bg-gray-50/40 border-b border-gray-200">
                     <tr>
@@ -216,8 +217,10 @@ export default function PendingChallansPage() {
                         >
                           <td className="py-3 px-4 text-center">
                             <button
+                              aria-pressed={isSelected}
+                              aria-label={`Select challan ${c.documentNumber}`}
                               onClick={() => handleToggleSelect(c.id, c.customerId)}
-                              className="text-emerald-700 hover:text-emerald-900"
+                              className="icon-action text-emerald-800"
                             >
                               {isSelected ? (
                                 <CheckSquare className="w-5 h-5 text-emerald-600" />
@@ -247,22 +250,24 @@ export default function PendingChallansPage() {
                           <td className="py-3 px-4 text-xs text-gray-500 font-mono">
                             {c.transportDetails || 'Direct'}
                           </td>
-                          <td className="py-3 px-4 text-right font-mono font-bold text-gray-900">
+                          <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-gray-900">
                             {formatINR(c.grandTotal)}
                           </td>
                           <td className="py-3 px-4 text-center">
                             <div className="flex items-center justify-center gap-2">
                               <button
                                 onClick={() => setCreatedInvoice(c)}
-                                title="View & Print Challan"
-                                className="text-gray-600 hover:text-emerald-700 p-1 rounded hover:bg-gray-100"
+                                title="View and print challan"
+                                aria-label={`View and print ${c.documentNumber}`}
+                                className="text-gray-600 hover:text-emerald-700 icon-action hover:bg-gray-100"
                               >
                                 <Printer className="w-4 h-4" />
                               </button>
                               <button
                                 onClick={() => handleCancelChallan(c.id, c.documentNumber)}
-                                title="Cancel / Site Return (Restock)"
-                                className="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50"
+                                title="Cancel and restock"
+                                aria-label={`Cancel and restock ${c.documentNumber}`}
+                                className="text-red-500 hover:text-red-700 icon-action hover:bg-red-50"
                               >
                                 <XCircle className="w-4 h-4" />
                               </button>

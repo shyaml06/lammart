@@ -122,6 +122,7 @@ model ProductVariant {
   unit                ProductUnit     @default(Sheet)
   sheetsPerBox        Int?            @map("sheets_per_box")
   reorderLevel        Int             @default(5) @map("reorder_level")
+  imageUrl            String?         @map("image_url")
   isActive            Boolean         @default(true) @map("is_active")
   createdAt           DateTime        @default(now()) @map("created_at")
   updatedAt           DateTime        @updatedAt @map("updated_at")

@@ -50,8 +50,11 @@ export default function InventoryPage() {
 
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
+  const [stockError, setStockError] = useState('');
+
   // Load catalog variants with stock
   const loadStock = async () => {
+    setStockError('');
     setIsLoading(true);
     try {
       let url = `/catalog/variants?limit=100`;
@@ -61,7 +64,7 @@ export default function InventoryPage() {
       const res = await apiRequest(url);
       setVariants(res.data || []);
     } catch (err) {
-      console.error('Failed to load stock:', err);
+      setStockError('Could not load stock. Displayed quantities may be out of date.');
     } finally {
       setIsLoading(false);
     }
@@ -194,17 +197,18 @@ export default function InventoryPage() {
 
       {/* Stock Matrix Table */}
       <div className="bg-white rounded-2xl shadow-sm border border-[#E7E2D9] overflow-hidden">
-        <div className="overflow-x-auto">
+        {stockError && <div className="p-4"><p role="alert">{stockError}</p><button type="button" className="min-h-11 underline" onClick={loadStock}>Retry stock lookup</button></div>}
+        <div role="region" aria-label="Stock and godown table; scroll for more columns" tabIndex={0} className="table-scroll">
           <table className="w-full text-left text-sm">
             <thead className="text-xs uppercase font-semibold text-gray-600 bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="py-3 px-4">Brand</th>
                 <th className="py-3 px-4">Design Code & Name</th>
                 <th className="py-3 px-4">Finish / Thickness</th>
-                <th className="py-3 px-4 text-center">Reorder Lvl</th>
-                <th className="py-3 px-4 text-center bg-emerald-50/50 text-emerald-950">Showroom Stock</th>
-                <th className="py-3 px-4 text-center bg-blue-50/50 text-blue-950">Godown Stock</th>
-                <th className="py-3 px-4 text-center font-bold">Total Stock</th>
+                <th className="py-3 px-4 text-right">Reorder Lvl</th>
+                <th className="py-3 px-4 text-right bg-emerald-50/50 text-emerald-950">Showroom Stock</th>
+                <th className="py-3 px-4 text-right bg-blue-50/50 text-blue-950">Godown Stock</th>
+                <th className="py-3 px-4 text-right font-bold">Total Stock</th>
                 <th className="py-3 px-4 text-right">Selling Rate</th>
                 <th className="py-3 px-4 text-center">Actions</th>
               </tr>
@@ -235,14 +239,14 @@ export default function InventoryPage() {
                       <td className="py-3.5 px-4 text-xs text-gray-600">
                         {v.finish} | {v.thicknessMm}mm ({v.size})
                       </td>
-                      <td className="py-3.5 px-4 text-center font-mono text-xs text-gray-400">{v.reorderLevel}</td>
-                      <td className="py-3.5 px-4 text-center font-mono font-bold text-emerald-900 bg-emerald-50/20">
+                      <td className="py-3.5 px-4 text-right font-mono tabular-nums tabular-nums text-xs text-content-muted">{v.reorderLevel}</td>
+                      <td className="py-3.5 px-4 text-right font-mono tabular-nums tabular-nums font-bold text-emerald-900 bg-emerald-50/20">
                         {showroom}
                       </td>
-                      <td className="py-3.5 px-4 text-center font-mono font-bold text-blue-900 bg-blue-50/20">
+                      <td className="py-3.5 px-4 text-right font-mono tabular-nums tabular-nums font-bold text-blue-900 bg-blue-50/20">
                         {godown}
                       </td>
-                      <td className="py-3.5 px-4 text-center">
+                      <td className="py-3.5 px-4 text-right">
                         <span
                           className={`font-mono font-black text-sm px-2.5 py-0.5 rounded-full ${
                             isLow
@@ -252,8 +256,9 @@ export default function InventoryPage() {
                         >
                           {total} {v.unit}s
                         </span>
+                        {isLow && <span className="ml-2 whitespace-nowrap text-xs font-semibold text-red-800">Low stock</span>}
                       </td>
-                      <td className="py-3.5 px-4 text-right font-mono font-semibold text-gray-900">
+                      <td className="py-3.5 px-4 text-right font-mono tabular-nums font-semibold text-gray-900">
                         {formatINR(v.defaultSellingPrice)}
                       </td>
                       <td className="py-3.5 px-4 text-center">
@@ -265,7 +270,7 @@ export default function InventoryPage() {
                               setShowInwardModal(true);
                             }}
                             title="Inward from Supplier (Boxes -> Sheets)"
-                            className="flex items-center gap-1 bg-emerald-100 text-emerald-800 hover:bg-emerald-200 px-2.5 py-1 rounded-lg text-xs font-semibold transition"
+                            className="flex min-h-11 items-center gap-1 bg-emerald-100 text-emerald-800 hover:bg-emerald-200 px-2.5 py-1 rounded-lg text-xs font-semibold transition"
                           >
                             <PackagePlus className="w-3.5 h-3.5" />
                             <span>Inward</span>
@@ -278,7 +283,7 @@ export default function InventoryPage() {
                               setShowTransferModal(true);
                             }}
                             title="Transfer Stock between Locations"
-                            className="flex items-center gap-1 bg-blue-100 text-blue-800 hover:bg-blue-200 px-2.5 py-1 rounded-lg text-xs font-semibold transition"
+                            className="flex min-h-11 items-center gap-1 bg-blue-100 text-blue-800 hover:bg-blue-200 px-2.5 py-1 rounded-lg text-xs font-semibold transition"
                           >
                             <ArrowLeftRight className="w-3.5 h-3.5" />
                             <span>Transfer</span>
