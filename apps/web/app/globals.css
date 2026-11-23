@@ -24,52 +24,85 @@
   }
 }
 
+/* Print defaults and utilities */
+@page {
+  size: A4;
+  margin: 10mm;
+}
+
+.print-only {
+  display: none;
+}
+.print-copy {
+  display: none;
+}
+.thermal-document {
+  max-width: 72mm;
+}
+
 /* Print styling for Bills, Challans & Invoices */
 @media print {
+  *, *::before, *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
   body {
     background: white !important;
     color: black !important;
   }
+
   .no-print {
     display: none !important;
   }
+
   .print-only {
     display: block !important;
   }
-}
 
-@layer components {
-  .icon-action {
-    @apply inline-grid min-h-11 min-w-11 place-items-center rounded-lg;
+  /* Isolate print document - hide everything except the print portal root */
+  body > :not(.print-copy) {
+    display: none !important;
   }
-  .table-scroll {
-    @apply max-h-[60vh] overflow-auto;
-    scrollbar-gutter: stable;
-  }
-  .table-scroll th {
-    @apply sticky top-0 z-10 bg-gray-50;
-  }
-  .skip-link {
-    @apply sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-2 focus:z-50 focus:rounded-lg focus:bg-white focus:p-3;
-  }
-}
 
-:where(button, input, select, textarea, a, [tabindex]):focus-visible {
-  outline: 2px solid #0B7A55 !important;
-  outline-offset: 2px;
-}
-.print-copy { display: none; }
-.thermal-document { max-width: 72mm; }
+  body > .print-copy {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
 
-@media print {
-  body:has(> .print-copy) { display: block !important; min-height: 0; }
-  body:has(> .print-copy) > :not(.print-copy) { display: none !important; }
-  body > .print-copy { display: block !important; }
-  .print-document { color: #000; padding: 0; }
-  .print-document * { color: inherit !important; background: transparent !important; box-shadow: none !important; }
-  .print-document thead { display: table-header-group; }
-  .print-document tr, .print-keep { break-inside: avoid; }
-  .print-table th, .print-table td { padding: 4px; overflow-wrap: anywhere; }
-  .print-table { table-layout: fixed; font-size: 9pt; }
-  .print-table th:nth-child(2) { width: 27%; }
+  .print-document {
+    color: #000 !important;
+    padding: 0 !important;
+  }
+
+  .print-document thead {
+    display: table-header-group !important;
+  }
+
+  .print-document tr,
+  .print-table tr,
+  .print-keep {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  .print-table {
+    table-layout: fixed;
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9pt;
+  }
+
+  .print-table th,
+  .print-table td {
+    padding: 4px;
+    overflow-wrap: anywhere;
+  }
+
+  .print-table th:nth-child(2) {
+    width: 27%;
+  }
 }

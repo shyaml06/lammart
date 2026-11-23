@@ -1,6 +1,8 @@
 'use client';
 
-import { Printer, X, CheckCircle2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { X } from 'lucide-react';
 import { formatINR, formatDate } from '@/lib/formatters';
 
 interface PrintModalProps {
@@ -9,46 +11,30 @@ interface PrintModalProps {
 }
 
 export default function PrintModal({ transaction, onClose }: PrintModalProps) {
-  if (!transaction) return null;
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [layout, setLayout] = useState<'a4' | 'thermal'>('a4');
+  const isOpen = Boolean(transaction);
 
+  useEffect(() => {
+    const element = dialog.current;
+    const previous = window.document.activeElement;
+    if (isOpen && element && !element.open) element.showModal();
+    return () => {
+      if (element?.open) element.close();
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    };
+  }, [isOpen]);
+
+  if (!transaction || typeof window === 'undefined') return null;
   const isChallan = transaction.transactionType === 'Delivery_Challan';
   const isEstimate = transaction.transactionType === 'Estimate';
-  const docTitle = isChallan
-    ? 'DELIVERY CHALLAN'
-    : isEstimate
-    ? 'ESTIMATE / QUOTATION'
-    : 'TAX INVOICE';
+  const docTitle = isChallan ? 'DELIVERY CHALLAN' : isEstimate ? 'ESTIMATE / QUOTATION' : 'TAX INVOICE';
 
-  return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-gray-200">
-        {/* Modal Top Bar */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50 rounded-t-2xl no-print">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-            <span className="font-semibold text-gray-800">
-              {docTitle} Created: <span className="font-mono text-emerald-700">{transaction.documentNumber}</span>
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => window.print()}
-              className="flex items-center gap-2 bg-[#0B7A55] hover:bg-[#086143] text-white px-4 py-2 rounded-xl text-sm font-medium shadow transition-all"
-            >
-              <Printer className="w-4 h-4" />
-              <span>Print Document</span>
-            </button>
-            <button
-              onClick={onClose}
-              className="p-2 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-200 transition"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Printable Document Area */}
-        <div className="p-8 overflow-y-auto text-gray-900 font-sans print:p-0">
+  const pageCss = layout === 'a4'
+    ? '@page { size: A4; margin: 10mm; }'
+    : '@page { size: auto; margin: 3mm; }';
+  const a4 = (
+    <article className="print-document p-6 text-gray-900">
           {/* Header */}
           <div className="border-b-2 border-gray-900 pb-4 mb-6">
             <div className="flex justify-between items-start">
@@ -108,7 +94,7 @@ export default function PrintModal({ transaction, onClose }: PrintModalProps) {
           </div>
 
           {/* Line Items Table */}
-          <table className="w-full text-left text-sm border-collapse mb-6">
+          <table className="print-table w-full text-left text-sm border-collapse mb-6">
             <thead>
               <tr className="border-b-2 border-gray-800 bg-gray-100 text-gray-800 text-xs uppercase font-bold">
                 <th className="py-2 px-3">#</th>
@@ -133,7 +119,7 @@ export default function PrintModal({ transaction, onClose }: PrintModalProps) {
                   <tr key={li.id || idx} className="hover:bg-gray-50">
                     <td className="py-2.5 px-3 text-gray-500">{idx + 1}</td>
                     <td className="py-2.5 px-3 font-medium text-gray-900">{desc}</td>
-                    <td className="py-2.5 px-3 text-center font-mono text-xs text-gray-600">{li.variant?.hsnCode || '4823'}</td>
+                    <td className="py-2.5 px-3 text-center font-mono text-xs text-gray-600">{li.variant?.hsnCode || '—'}</td>
                     <td className="py-2.5 px-3 text-right font-bold text-gray-900">{li.quantity} {li.variant?.unit || 'Sheets'}</td>
                     <td className="py-2.5 px-3 text-right font-mono">{formatINR(li.rate)}</td>
                     <td className="py-2.5 px-3 text-right font-mono text-gray-600">{li.discountPercent ? `${li.discountPercent}%` : '-'}</td>
@@ -147,7 +133,7 @@ export default function PrintModal({ transaction, onClose }: PrintModalProps) {
           </table>
 
           {/* Summary / Tax Split */}
-          <div className="flex justify-between items-start border-t-2 border-gray-800 pt-4">
+          <div className="print-keep flex justify-between items-start border-t-2 border-gray-800 pt-4">
             <div className="max-w-md text-xs text-gray-500 space-y-1">
               <p className="font-bold text-gray-700">Terms & Conditions:</p>
               <p>1. Goods once sold will not be taken back without original challan.</p>
@@ -161,19 +147,19 @@ export default function PrintModal({ transaction, onClose }: PrintModalProps) {
               </div>
               {!isChallan && Number(transaction.totalCgst) > 0 && (
                 <div className="flex justify-between text-gray-600 text-xs">
-                  <span>CGST (9%):</span>
+                  <span>CGST:</span>
                   <span className="font-mono">{formatINR(transaction.totalCgst)}</span>
                 </div>
               )}
               {!isChallan && Number(transaction.totalSgst) > 0 && (
                 <div className="flex justify-between text-gray-600 text-xs">
-                  <span>SGST (9%):</span>
+                  <span>SGST:</span>
                   <span className="font-mono">{formatINR(transaction.totalSgst)}</span>
                 </div>
               )}
               {!isChallan && Number(transaction.totalIgst) > 0 && (
                 <div className="flex justify-between text-gray-600 text-xs">
-                  <span>IGST (18%):</span>
+                  <span>IGST:</span>
                   <span className="font-mono">{formatINR(transaction.totalIgst)}</span>
                 </div>
               )}
@@ -185,18 +171,65 @@ export default function PrintModal({ transaction, onClose }: PrintModalProps) {
           </div>
 
           {/* Signatures */}
-          <div className="flex justify-between items-end mt-16 pt-8 border-t border-dashed border-gray-300 text-xs text-gray-600">
+          <div className="print-keep flex justify-between items-end mt-16 pt-8 border-t border-dashed border-gray-300 text-xs text-gray-600">
             <div>
               <div className="border-t border-gray-400 w-48 mb-1"></div>
-              <span>Receiver's Signature</span>
+              <span>Receiver&apos;s Signature</span>
             </div>
             <div className="text-right">
               <div className="border-t border-gray-400 w-48 mb-1 ml-auto"></div>
               <span>For LAMMART LAMINATES (Authorized Signatory)</span>
             </div>
           </div>
-        </div>
+    </article>
+  );
+  const receipt = (
+    <article className="print-document thermal-document mx-auto space-y-2 p-2 font-mono text-xs tabular-nums">
+      <h2 className="text-sm font-bold">LAMMART</h2>
+      <p>{docTitle} • {transaction.documentNumber}</p>
+      <p>{formatDate(transaction.date)} • {transaction.customer?.name}</p>
+      <ol className="space-y-2 border-y border-current py-2">
+        {transaction.lineItems?.map((li: any, index: number) => (
+          <li key={li.id ?? index} className="print-keep">
+            <p className="break-words font-semibold">{li.variant?.brand} {li.variant?.designCode} {li.variant?.designName}</p>
+            <p>HSN: {li.variant?.hsnCode || '—'}</p>
+            <p className="flex justify-between gap-2"><span>{li.quantity} × {formatINR(li.rate)}</span><strong>{formatINR(li.total)}</strong></p>
+            {Number(li.discountPercent) > 0 && <p>Discount: {li.discountPercent}%</p>}
+          </li>
+        ))}
+      </ol>
+      <div className="print-keep">
+        {!isChallan && <>
+          <p>Taxable: {formatINR(transaction.subtotal)}</p>
+          {Number(transaction.totalCgst) > 0 && <p>CGST: {formatINR(transaction.totalCgst)}</p>}
+          {Number(transaction.totalSgst) > 0 && <p>SGST: {formatINR(transaction.totalSgst)}</p>}
+          {Number(transaction.totalIgst) > 0 && <p>IGST: {formatINR(transaction.totalIgst)}</p>}
+        </>}
+        <p className="border-t border-current pt-1 font-bold">Total: {formatINR(transaction.grandTotal)}</p>
+        {transaction.transactionType === 'Tax_Invoice' && <p>Receipt copy • Full tax invoice available</p>}
       </div>
-    </div>
+    </article>
+  );
+
+  return createPortal(
+    <>
+      <dialog ref={dialog} aria-labelledby="print-preview-title"
+        onCancel={(event) => { event.preventDefault(); onClose(); }}
+        className="no-print max-h-[90dvh] w-[calc(100%_-_2rem)] max-w-4xl overflow-y-auto rounded-2xl bg-white p-0 backdrop:bg-black/60">
+        <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border bg-white p-3">
+          <h2 id="print-preview-title" className="mr-auto font-heading font-bold">{docTitle} preview</h2>
+          <label className="text-sm">Paper format{' '}
+            <select className="min-h-11 rounded-lg border border-chip px-2" value={layout} onChange={(event) => setLayout(event.target.value === 'thermal' ? 'thermal' : 'a4')}>
+              <option value="a4">A4 document</option>
+              <option value="thermal">80 mm receipt copy</option>
+            </select>
+          </label>
+          <button type="button" onClick={() => window.print()} className="min-h-11 rounded-xl bg-primary px-4 text-sm font-semibold text-white hover:bg-primary-hover">Print document</button>
+          <button type="button" onClick={onClose} aria-label="Close print preview" title="Close print preview" className="icon-action"><X aria-hidden="true" className="h-5 w-5" /></button>
+        </div>
+        <div className="overflow-x-auto">{layout === 'a4' ? a4 : receipt}</div>
+      </dialog>
+      <div className="print-copy" aria-hidden="true"><style>{pageCss}</style>{layout === 'a4' ? a4 : receipt}</div>
+    </>, window.document.body,
   );
 }
