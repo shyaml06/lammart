@@ -1,0 +1,919 @@
+diff --git a/apps/web/app/challans/page.tsx b/apps/web/app/challans/page.tsx
+index 5e2f3bf..50b5e13 100644
+--- a/apps/web/app/challans/page.tsx
++++ b/apps/web/app/challans/page.tsx
+@@ -86,6 +86,7 @@ export default function PendingChallansPage() {
+       });
+ 
+       setCreatedInvoice(res.data);
++      setSelectedChallanIds([]);
+       loadChallans(); // Refresh list
+     } catch (err: any) {
+       setErrorMsg(err.message || 'Failed to convert challans');
+@@ -157,7 +158,7 @@ export default function PendingChallansPage() {
+       {errorMsg && (
+         <div className="bg-red-50 border border-red-200 text-red-700 p-3.5 rounded-xl text-xs flex items-center gap-2 font-medium">
+           <AlertCircle className="w-4 h-4 shrink-0" />
+-          <span>{errorMsg}</span>
++          <span role="alert">{errorMsg}</span>
+         </div>
+       )}
+ 
+@@ -189,7 +190,7 @@ export default function PendingChallansPage() {
+               </div>
+ 
+               {/* Table of Challans for this customer */}
+-              <div className="overflow-x-auto">
++              <div role="region" aria-label="Challans table; scroll for more columns" tabIndex={0} className="table-scroll">
+                 <table className="w-full text-left text-sm">
+                   <thead className="text-xs uppercase font-semibold text-gray-600 bg-gray-50/40 border-b border-gray-200">
+                     <tr>
+@@ -216,8 +217,10 @@ export default function PendingChallansPage() {
+                         >
+                           <td className="py-3 px-4 text-center">
+                             <button
++                              aria-pressed={isSelected}
++                              aria-label={`Select challan ${c.documentNumber}`}
+                               onClick={() => handleToggleSelect(c.id, c.customerId)}
+-                              className="text-emerald-700 hover:text-emerald-900"
++                              className="icon-action text-emerald-800"
+                             >
+                               {isSelected ? (
+                                 <CheckSquare className="w-5 h-5 text-emerald-600" />
+@@ -247,22 +250,24 @@ export default function PendingChallansPage() {
+                           <td className="py-3 px-4 text-xs text-gray-500 font-mono">
+                             {c.transportDetails || 'Direct'}
+                           </td>
+-                          <td className="py-3 px-4 text-right font-mono font-bold text-gray-900">
++                          <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-gray-900">
+                             {formatINR(c.grandTotal)}
+                           </td>
+                           <td className="py-3 px-4 text-center">
+                             <div className="flex items-center justify-center gap-2">
+                               <button
+                                 onClick={() => setCreatedInvoice(c)}
+-                                title="View & Print Challan"
+-                                className="text-gray-600 hover:text-emerald-700 p-1 rounded hover:bg-gray-100"
++                                title="View and print challan"
++                                aria-label={`View and print ${c.documentNumber}`}
++                                className="text-gray-600 hover:text-emerald-700 icon-action hover:bg-gray-100"
+                               >
+                                 <Printer className="w-4 h-4" />
+                               </button>
+                               <button
+                                 onClick={() => handleCancelChallan(c.id, c.documentNumber)}
+-                                title="Cancel / Site Return (Restock)"
+-                                className="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50"
++                                title="Cancel and restock"
++                                aria-label={`Cancel and restock ${c.documentNumber}`}
++                                className="text-red-500 hover:text-red-700 icon-action hover:bg-red-50"
+                               >
+                                 <XCircle className="w-4 h-4" />
+                               </button>
+diff --git a/apps/web/app/globals.css b/apps/web/app/globals.css
+index 92c40e9..7c90517 100644
+--- a/apps/web/app/globals.css
++++ b/apps/web/app/globals.css
+@@ -27,3 +27,39 @@
+     display: block !important;
+   }
+ }
++
++@layer components {
++  .icon-action {
++    @apply inline-grid min-h-11 min-w-11 place-items-center rounded-lg;
++  }
++  .table-scroll {
++    @apply max-h-[60vh] overflow-auto;
++    scrollbar-gutter: stable;
++  }
++  .table-scroll th {
++    @apply sticky top-0 z-10 bg-gray-50;
++  }
++  .skip-link {
++    @apply sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-2 focus:z-50 focus:rounded-lg focus:bg-white focus:p-3;
++  }
++}
++
++:where(button, input, select, textarea, a, [tabindex]):focus-visible {
++  outline: 2px solid #0B7A55 !important;
++  outline-offset: 2px;
++}
++.print-copy { display: none; }
++.thermal-document { max-width: 72mm; }
++
++@media print {
++  body:has(> .print-copy) { display: block !important; min-height: 0; }
++  body:has(> .print-copy) > :not(.print-copy) { display: none !important; }
++  body > .print-copy { display: block !important; }
++  .print-document { color: #000; padding: 0; }
++  .print-document * { color: inherit !important; background: transparent !important; box-shadow: none !important; }
++  .print-document thead { display: table-header-group; }
++  .print-document tr, .print-keep { break-inside: avoid; }
++  .print-table th, .print-table td { padding: 4px; overflow-wrap: anywhere; }
++  .print-table { table-layout: fixed; font-size: 9pt; }
++  .print-table th:nth-child(2) { width: 27%; }
++}
+diff --git a/apps/web/app/inventory/page.tsx b/apps/web/app/inventory/page.tsx
+index 97baaf7..6ebc1bf 100644
+--- a/apps/web/app/inventory/page.tsx
++++ b/apps/web/app/inventory/page.tsx
+@@ -50,8 +50,11 @@ export default function InventoryPage() {
+ 
+   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+ 
++  const [stockError, setStockError] = useState('');
++
+   // Load catalog variants with stock
+   const loadStock = async () => {
++    setStockError('');
+     setIsLoading(true);
+     try {
+       let url = `/catalog/variants?limit=100`;
+@@ -61,7 +64,7 @@ export default function InventoryPage() {
+       const res = await apiRequest(url);
+       setVariants(res.data || []);
+     } catch (err) {
+-      console.error('Failed to load stock:', err);
++      setStockError('Could not load stock. Displayed quantities may be out of date.');
+     } finally {
+       setIsLoading(false);
+     }
+@@ -194,17 +197,18 @@ export default function InventoryPage() {
+ 
+       {/* Stock Matrix Table */}
+       <div className="bg-white rounded-2xl shadow-sm border border-[#E7E2D9] overflow-hidden">
+-        <div className="overflow-x-auto">
++        {stockError && <div className="p-4"><p role="alert">{stockError}</p><button type="button" className="min-h-11 underline" onClick={loadStock}>Retry stock lookup</button></div>}
++        <div role="region" aria-label="Stock and godown table; scroll for more columns" tabIndex={0} className="table-scroll">
+           <table className="w-full text-left text-sm">
+             <thead className="text-xs uppercase font-semibold text-gray-600 bg-gray-50 border-b border-gray-200">
+               <tr>
+                 <th className="py-3 px-4">Brand</th>
+                 <th className="py-3 px-4">Design Code & Name</th>
+                 <th className="py-3 px-4">Finish / Thickness</th>
+-                <th className="py-3 px-4 text-center">Reorder Lvl</th>
+-                <th className="py-3 px-4 text-center bg-emerald-50/50 text-emerald-950">Showroom Stock</th>
+-                <th className="py-3 px-4 text-center bg-blue-50/50 text-blue-950">Godown Stock</th>
+-                <th className="py-3 px-4 text-center font-bold">Total Stock</th>
++                <th className="py-3 px-4 text-right">Reorder Lvl</th>
++                <th className="py-3 px-4 text-right bg-emerald-50/50 text-emerald-950">Showroom Stock</th>
++                <th className="py-3 px-4 text-right bg-blue-50/50 text-blue-950">Godown Stock</th>
++                <th className="py-3 px-4 text-right font-bold">Total Stock</th>
+                 <th className="py-3 px-4 text-right">Selling Rate</th>
+                 <th className="py-3 px-4 text-center">Actions</th>
+               </tr>
+@@ -235,14 +239,14 @@ export default function InventoryPage() {
+                       <td className="py-3.5 px-4 text-xs text-gray-600">
+                         {v.finish} | {v.thicknessMm}mm ({v.size})
+                       </td>
+-                      <td className="py-3.5 px-4 text-center font-mono text-xs text-gray-400">{v.reorderLevel}</td>
+-                      <td className="py-3.5 px-4 text-center font-mono font-bold text-emerald-900 bg-emerald-50/20">
++                      <td className="py-3.5 px-4 text-right font-mono tabular-nums tabular-nums text-xs text-content-muted">{v.reorderLevel}</td>
++                      <td className="py-3.5 px-4 text-right font-mono tabular-nums tabular-nums font-bold text-emerald-900 bg-emerald-50/20">
+                         {showroom}
+                       </td>
+-                      <td className="py-3.5 px-4 text-center font-mono font-bold text-blue-900 bg-blue-50/20">
++                      <td className="py-3.5 px-4 text-right font-mono tabular-nums tabular-nums font-bold text-blue-900 bg-blue-50/20">
+                         {godown}
+                       </td>
+-                      <td className="py-3.5 px-4 text-center">
++                      <td className="py-3.5 px-4 text-right">
+                         <span
+                           className={`font-mono font-black text-sm px-2.5 py-0.5 rounded-full ${
+                             isLow
+@@ -252,8 +256,9 @@ export default function InventoryPage() {
+                         >
+                           {total} {v.unit}s
+                         </span>
++                        {isLow && <span className="ml-2 whitespace-nowrap text-xs font-semibold text-red-800">Low stock</span>}
+                       </td>
+-                      <td className="py-3.5 px-4 text-right font-mono font-semibold text-gray-900">
++                      <td className="py-3.5 px-4 text-right font-mono tabular-nums font-semibold text-gray-900">
+                         {formatINR(v.defaultSellingPrice)}
+                       </td>
+                       <td className="py-3.5 px-4 text-center">
+@@ -265,7 +270,7 @@ export default function InventoryPage() {
+                               setShowInwardModal(true);
+                             }}
+                             title="Inward from Supplier (Boxes -> Sheets)"
+-                            className="flex items-center gap-1 bg-emerald-100 text-emerald-800 hover:bg-emerald-200 px-2.5 py-1 rounded-lg text-xs font-semibold transition"
++                            className="flex min-h-11 items-center gap-1 bg-emerald-100 text-emerald-800 hover:bg-emerald-200 px-2.5 py-1 rounded-lg text-xs font-semibold transition"
+                           >
+                             <PackagePlus className="w-3.5 h-3.5" />
+                             <span>Inward</span>
+@@ -278,7 +283,7 @@ export default function InventoryPage() {
+                               setShowTransferModal(true);
+                             }}
+                             title="Transfer Stock between Locations"
+-                            className="flex items-center gap-1 bg-blue-100 text-blue-800 hover:bg-blue-200 px-2.5 py-1 rounded-lg text-xs font-semibold transition"
++                            className="flex min-h-11 items-center gap-1 bg-blue-100 text-blue-800 hover:bg-blue-200 px-2.5 py-1 rounded-lg text-xs font-semibold transition"
+                           >
+                             <ArrowLeftRight className="w-3.5 h-3.5" />
+                             <span>Transfer</span>
+diff --git a/apps/web/app/layout.tsx b/apps/web/app/layout.tsx
+index 0c05edc..552bc7f 100644
+--- a/apps/web/app/layout.tsx
++++ b/apps/web/app/layout.tsx
+@@ -26,8 +26,9 @@ export default function RootLayout({
+   return (
+     <html lang="en" className={`${inter.variable} ${spaceGrotesk.variable}`}>
+       <body className="min-h-screen bg-[#FAF8F4] flex flex-col font-sans antialiased text-[#14201B]">
++        <a className="skip-link" href="#main-content">Skip to main content</a>
+         <Navigation />
+-        <main className="flex-1 max-w-[1500px] w-full mx-auto p-4 md:p-6">
++        <main id="main-content" tabIndex={-1} className="flex-1 max-w-[1500px] w-full mx-auto p-4 md:p-6">
+           {children}
+         </main>
+       </body>
+diff --git a/apps/web/app/page.tsx b/apps/web/app/page.tsx
+index d423dee..218f750 100644
+--- a/apps/web/app/page.tsx
++++ b/apps/web/app/page.tsx
+@@ -72,8 +72,26 @@ export default function CounterBillingPage() {
+   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+ 
+   const searchInputRef = useRef<HTMLInputElement>(null);
++  const [activeResult, setActiveResult] = useState(-1);
++  const [searchError, setSearchError] = useState('');
++  const [partyError, setPartyError] = useState('');
++  const submitLock = useRef(false);
++  const rateInputRef = useRef<HTMLInputElement>(null);
+   const qtyInputRef = useRef<HTMLInputElement>(null);
+ 
++  useEffect(() => {
++    if (!window.matchMedia('(pointer: coarse)').matches) searchInputRef.current?.focus();
++  }, []);
++
++  useEffect(() => {
++    qtyInputRef.current?.focus();
++    qtyInputRef.current?.select();
++  }, [selectedVariant]);
++
++  useEffect(() => {
++    if (activeResult >= 0) document.getElementById(`sku-option-${activeResult}`)?.scrollIntoView({ block: 'nearest' });
++  }, [activeResult]);
++
+   // Load Customers & Referrers on mount
+   useEffect(() => {
+     async function loadParties() {
+@@ -91,7 +109,7 @@ export default function CounterBillingPage() {
+ 
+         setReferrers(allRef);
+       } catch (err: any) {
+-        console.error('Failed to load parties:', err);
++        setPartyError('Could not load customers and referrers. Reload to try again.');
+       }
+     }
+     loadParties();
+@@ -99,24 +117,22 @@ export default function CounterBillingPage() {
+ 
+   // Quick Autocomplete Search
+   useEffect(() => {
+-    if (!searchQuery.trim()) {
+-      setSearchResults([]);
+-      return;
+-    }
+-
++    const query = searchQuery.trim();
++    if (!query) return;
++    const controller = new AbortController();
+     const timer = setTimeout(async () => {
+-      setIsSearching(true);
+       try {
+-        const res = await apiRequest(`/catalog/variants?q=${encodeURIComponent(searchQuery)}&limit=10`);
+-        setSearchResults(res.data || []);
+-      } catch (err) {
+-        console.error('Search failed:', err);
++        const res = await apiRequest(`/catalog/variants?q=${encodeURIComponent(query)}&limit=10`, {
++          signal: controller.signal,
++        });
++        if (!controller.signal.aborted && document.activeElement === searchInputRef.current) setSearchResults(res.data || []);
++      } catch {
++        if (!controller.signal.aborted) setSearchError('Search failed. Change your query to try again.');
+       } finally {
+-        setIsSearching(false);
++        if (!controller.signal.aborted) setIsSearching(false);
+       }
+     }, 200);
+-
+-    return () => clearTimeout(timer);
++    return () => { clearTimeout(timer); controller.abort(); };
+   }, [searchQuery]);
+ 
+   // When a variant is picked from search
+@@ -127,7 +143,7 @@ export default function CounterBillingPage() {
+     setItemDiscount(0);
+     setSearchQuery('');
+     setSearchResults([]);
+-    setTimeout(() => qtyInputRef.current?.focus(), 50);
++    setActiveResult(-1);
+   };
+ 
+   // Add line item
+@@ -184,6 +200,8 @@ export default function CounterBillingPage() {
+       return;
+     }
+ 
++    if (submitLock.current) return;
++    submitLock.current = true;
+     setIsSubmitting(true);
+     setErrorMessage(null);
+ 
+@@ -216,17 +234,33 @@ export default function CounterBillingPage() {
+     } catch (err: any) {
+       setErrorMessage(err.message || 'Failed to create transaction');
+     } finally {
++      submitLock.current = false;
+       setIsSubmitting(false);
+     }
+   };
+ 
+   return (
+-    <div className="space-y-6">
++    <div className="space-y-6" onKeyDown={(e) => {
++      if (e.defaultPrevented || e.nativeEvent.isComposing || e.repeat || createdTransaction) return;
++      if (e.key === 'F2') {
++        e.preventDefault();
++        searchInputRef.current?.focus();
++      }
++      if (e.key === 'F8' && !searchResults.length && !selectedVariant && !submitLock.current) {
++        e.preventDefault();
++        setDocType(current => current === 'Delivery_Challan' ? 'Tax_Invoice' : current === 'Tax_Invoice' ? 'Estimate' : 'Delivery_Challan');
++      }
++      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !selectedVariant && !searchResults.length) {
++        e.preventDefault();
++        void handleSubmit();
++      }
++    }}>
+       {/* Top Banner: Mode & Settings Switcher */}
+       <div className="bg-white rounded-2xl p-4 shadow-sm border border-[#E7E2D9] flex flex-wrap items-center justify-between gap-4">
+         {/* Document Mode Switcher */}
+         <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl">
+           <button
++            aria-pressed={docType === 'Delivery_Challan'}
+             onClick={() => setDocType('Delivery_Challan')}
+             className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+               docType === 'Delivery_Challan'
+@@ -237,6 +271,7 @@ export default function CounterBillingPage() {
+             Delivery Challan
+           </button>
+           <button
++            aria-pressed={docType === 'Tax_Invoice'}
+             onClick={() => setDocType('Tax_Invoice')}
+             className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+               docType === 'Tax_Invoice'
+@@ -247,6 +282,7 @@ export default function CounterBillingPage() {
+             GST Tax Invoice
+           </button>
+           <button
++            aria-pressed={docType === 'Estimate'}
+             onClick={() => setDocType('Estimate')}
+             className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+               docType === 'Estimate'
+@@ -299,12 +335,12 @@ export default function CounterBillingPage() {
+       </div>
+ 
+       {/* Main Grid: Left = Item Entry & Cart, Right = Customer & Billing Summary */}
+-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
++      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+         {/* Left Column (2 Cols): Quick Autocomplete & Cart Table */}
+-        <div className="lg:col-span-2 space-y-6">
++        <div className="min-w-0 xl:col-span-2 space-y-6">
+           {/* Quick Search & Fast Entry Bar */}
+           <div className="bg-white rounded-2xl p-5 shadow-sm border border-[#E7E2D9] space-y-4">
+-            <div className="flex items-center justify-between">
++            <div className="flex flex-wrap items-center justify-between gap-2">
+               <h2 className="text-base font-bold text-gray-900 font-['Space_Grotesk'] flex items-center gap-2">
+                 <Search className="w-4 h-4 text-[#0B7A55]" />
+                 <span>Instant Shade & SKU Search</span>
+@@ -317,27 +353,66 @@ export default function CounterBillingPage() {
+             {/* Autocomplete Input */}
+             <div className="relative">
+               <input
++                aria-label="Search shades and SKUs"
++                aria-describedby="pos-shortcuts"
++                aria-keyshortcuts="F2"
++                role="combobox"
++                aria-autocomplete="list"
++                aria-expanded={searchResults.length > 0}
++                autoComplete="off"
++                aria-controls={searchResults.length ? 'sku-results' : undefined}
++                aria-activedescendant={activeResult >= 0 ? `sku-option-${activeResult}` : undefined}
++                onBlur={() => { setSearchResults([]); setActiveResult(-1); }}
++                onKeyDown={(e) => {
++                  if (e.nativeEvent.isComposing || e.ctrlKey || e.metaKey || e.altKey) return;
++                  if (!searchResults.length) return;
++                  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
++                    e.preventDefault();
++                    const delta = e.key === 'ArrowDown' ? 1 : -1;
++                    setActiveResult(i => i < 0 ? (delta === 1 ? 0 : searchResults.length - 1) : (i + delta + searchResults.length) % searchResults.length);
++                  } else if (e.key === 'Enter' && activeResult >= 0) {
++                    e.preventDefault();
++                    handleSelectVariant(searchResults[activeResult]);
++                  } else if (e.key === 'Escape') {
++                    e.preventDefault();
++                    setSearchResults([]);
++                    setActiveResult(-1);
++                  }
++                }}
+                 ref={searchInputRef}
+                 type="text"
+-                placeholder="Search Brand + Shade Code + Finish (Press Enter)..."
++                placeholder="Brand, shade code or finish"
+                 value={searchQuery}
+-                onChange={(e) => setSearchQuery(e.target.value)}
++                onChange={(e) => {
++                  setSearchResults([]);
++                  setActiveResult(-1);
++                  setSearchError('');
++                  setIsSearching(Boolean(e.target.value.trim()));
++                  setSearchQuery(e.target.value);
++                }}
+                 className="w-full bg-[#FAF8F4] border border-[#D9D3C7] rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#0B7A55] focus:bg-white text-gray-900 shadow-inner"
+               />
+ 
++              <p id="pos-shortcuts" className="mt-2 text-xs text-content-muted">F2 Search · ↑ ↓ Choose · Enter Select · F8 Change document · Ctrl/⌘ + Enter Save &amp; Print</p>
++              <p role="status" className="sr-only">{isSearching ? 'Searching' : searchQuery && !searchError ? `${searchResults.length} suggestions` : ''}</p>
++              {searchError && <p role="alert" className="mt-2 text-sm text-red-800">{searchError}</p>}
++              {searchQuery.trim() && !isSearching && !searchError && !searchResults.length && <p className="mt-2 text-sm text-gray-700">No suggestions displayed. Refine your search.</p>}
+               {/* Autocomplete Dropdown */}
+               {searchResults.length > 0 && (
+-                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-30 max-h-72 overflow-y-auto divide-y divide-gray-100">
+-                  {searchResults.map((v) => {
++                <div id="sku-results" role="listbox" aria-label="Matching variants" className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-30 max-h-72 overflow-y-auto divide-y divide-gray-100">
++                  {searchResults.map((v, index) => {
+                     const showroomStock = v.stockLedgers?.find((s) => s.location === 'Showroom')?.quantityOnHand || 0;
+                     const godownStock = v.stockLedgers?.find((s) => s.location === 'Godown')?.quantityOnHand || 0;
+ 
+                     return (
+-                      <button
++                      <div
+                         key={v.id}
+-                        type="button"
++                        id={`sku-option-${index}`}
++                        role="option"
++                        aria-selected={activeResult === index}
++                        onPointerDown={(event) => { event.preventDefault(); }}
+                         onClick={() => handleSelectVariant(v)}
+-                        className="w-full text-left p-3 hover:bg-emerald-50/60 transition flex items-center justify-between text-sm group"
++                        className={`flex min-h-11 w-full cursor-pointer items-center justify-between gap-3 p-3 text-left text-sm hover:bg-primary-tint ${activeResult === index ? "bg-primary-tint ring-2 ring-inset ring-primary" : ""}`}
+                       >
+                         <div>
+                           <div className="font-bold text-gray-900 group-hover:text-emerald-800">
+@@ -361,7 +436,7 @@ export default function CounterBillingPage() {
+                             {formatINR(v.defaultSellingPrice)}
+                           </div>
+                         </div>
+-                      </button>
++                      </div>
+                     );
+                   })}
+                 </div>
+@@ -380,11 +455,18 @@ export default function CounterBillingPage() {
+                   </div>
+                 </div>
+ 
+-                <div className="grid grid-cols-4 gap-3 pt-1">
++                <div className="grid grid-cols-2 gap-3 pt-1 xl:grid-cols-4">
+                   <div>
+-                    <label className="text-xs font-semibold text-gray-600 block mb-1">Quantity ({selectedVariant.unit})</label>
++                    <label htmlFor="line-qty" className="text-xs font-semibold text-gray-600 block mb-1">Quantity ({selectedVariant.unit})</label>
+                     <input
++                      id="line-qty"
+                       ref={qtyInputRef}
++                      onKeyDown={e => {
++                        if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.nativeEvent.isComposing) {
++                          e.preventDefault();
++                          if (e.currentTarget.reportValidity()) { rateInputRef.current?.focus(); rateInputRef.current?.select(); }
++                        }
++                      }}
+                       type="number"
+                       min="1"
+                       value={itemQty}
+@@ -394,9 +476,12 @@ export default function CounterBillingPage() {
+                   </div>
+ 
+                   <div>
+-                    <label className="text-xs font-semibold text-gray-600 block mb-1">Selling Rate (₹)</label>
++                    <label htmlFor="line-rate" className="text-xs font-semibold text-gray-600 block mb-1">Selling Rate (₹)</label>
+                     <input
+                       type="number"
++                      ref={rateInputRef}
++                      id="line-rate"
++                      min="0"
+                       step="0.01"
+                       value={itemRate}
+                       onChange={(e) => setItemRate(parseFloat(e.target.value) || 0)}
+@@ -405,12 +490,13 @@ export default function CounterBillingPage() {
+                   </div>
+ 
+                   <div>
+-                    <label className="text-xs font-semibold text-gray-600 block mb-1">Discount %</label>
++                    <label htmlFor="pos-discount" className="text-xs font-semibold text-gray-600 block mb-1">Discount %</label>
+                     <input
+                       type="number"
+                       min="0"
+                       max="100"
+-                      value={itemDiscount}
++                      id="pos-discount"
++                value={itemDiscount}
+                       onChange={(e) => setItemDiscount(parseFloat(e.target.value) || 0)}
+                       className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-emerald-600"
+                     />
+@@ -488,7 +574,9 @@ export default function CounterBillingPage() {
+                           <td className="py-3 px-4 text-center">
+                             <button
+                               onClick={() => handleRemoveItem(idx)}
+-                              className="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50 transition"
++                              aria-label={`Remove line ${idx + 1}: ${item.variant.designCode}`}
++                              title={`Remove line ${idx + 1}`}
++                              className="text-red-500 hover:text-red-700 inline-grid min-h-11 min-w-11 place-items-center rounded-lg hover:bg-red-50 transition"
+                             >
+                               <Trash2 className="w-4 h-4" />
+                             </button>
+@@ -514,8 +602,9 @@ export default function CounterBillingPage() {
+ 
+             {/* Customer Dropdown */}
+             <div>
+-              <label className="text-xs font-semibold text-gray-600 block mb-1">Billed To (Customer / Contractor)</label>
++              <label htmlFor="pos-customer" className="text-xs font-semibold text-gray-600 block mb-1">Billed To (Customer / Contractor)</label>
+               <select
++                id="pos-customer"
+                 value={selectedCustomerId}
+                 onChange={(e) => setSelectedCustomerId(e.target.value)}
+                 className="w-full bg-[#FAF8F4] border border-[#D9D3C7] rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-emerald-600 font-medium"
+@@ -530,8 +619,9 @@ export default function CounterBillingPage() {
+ 
+             {/* Carpenter / Architect Referrer Dropdown */}
+             <div>
+-              <label className="text-xs font-semibold text-gray-600 block mb-1">Tag Carpenter / Architect (Optional)</label>
++              <label htmlFor="pos-referrer" className="text-xs font-semibold text-gray-600 block mb-1">Tag Carpenter / Architect (Optional)</label>
+               <select
++                id="pos-referrer"
+                 value={selectedReferrerId}
+                 onChange={(e) => setSelectedReferrerId(e.target.value)}
+                 className="w-full bg-[#FAF8F4] border border-[#D9D3C7] rounded-xl px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-emerald-600"
+@@ -589,16 +679,18 @@ export default function CounterBillingPage() {
+               </div>
+             </div>
+ 
++            {partyError && <p role="alert" className="text-sm text-red-800">{partyError}</p>}
+             {errorMessage && (
+               <div className="bg-red-50 text-red-700 text-xs p-3 rounded-xl border border-red-200 font-medium flex items-center gap-2">
+                 <ShieldAlert className="w-4 h-4 shrink-0" />
+-                <span>{errorMessage}</span>
++                <span role="alert">{errorMessage}</span>
+               </div>
+             )}
+ 
+             {/* Save & Print Action Button */}
+             <button
+               onClick={handleSubmit}
++              aria-keyshortcuts="Control+Enter Meta+Enter"
+               disabled={isSubmitting || cartItems.length === 0}
+               className={`w-full py-3.5 px-6 rounded-xl text-white font-bold text-base shadow-md transition flex items-center justify-center gap-2 ${
+                 cartItems.length === 0 || isSubmitting
+@@ -619,7 +711,7 @@ export default function CounterBillingPage() {
+       {createdTransaction && (
+         <PrintModal
+           transaction={createdTransaction}
+-          onClose={() => setCreatedTransaction(null)}
++          onClose={() => { setCreatedTransaction(null); requestAnimationFrame(() => searchInputRef.current?.focus()); }}
+         />
+       )}
+     </div>
+diff --git a/apps/web/app/parties/page.tsx b/apps/web/app/parties/page.tsx
+index c36e59e..9f27334 100644
+--- a/apps/web/app/parties/page.tsx
++++ b/apps/web/app/parties/page.tsx
+@@ -149,7 +149,7 @@ export default function PartiesPage() {
+       {/* Tab 1: Parties Table */}
+       {activeTab === 'parties' && (
+         <div className="bg-white rounded-2xl shadow-sm border border-[#E7E2D9] overflow-hidden">
+-          <div className="overflow-x-auto">
++          <div role="region" aria-label="Parties and commissions table; scroll for more columns" tabIndex={0} className="table-scroll">
+             <table className="w-full text-left text-sm">
+               <thead className="text-xs uppercase font-semibold text-gray-600 bg-gray-50 border-b border-gray-200">
+                 <tr>
+@@ -190,10 +190,10 @@ export default function PartiesPage() {
+                         <td className="py-3.5 px-4 text-xs font-mono text-gray-600">
+                           {p.gstin || 'Unregistered'} ({p.stateCode})
+                         </td>
+-                        <td className="py-3.5 px-4 text-right font-mono text-xs text-gray-500">
++                        <td className="py-3.5 px-4 text-right font-mono tabular-nums text-xs text-gray-500">
+                           {formatINR(p.creditLimit)}
+                         </td>
+-                        <td className="py-3.5 px-4 text-right font-mono font-bold text-sm">
++                        <td className="py-3.5 px-4 text-right font-mono tabular-nums font-bold text-sm">
+                           <span className={balance > 0 ? 'text-amber-700' : 'text-emerald-700'}>
+                             {formatINR(balance)}
+                           </span>
+@@ -204,7 +204,7 @@ export default function PartiesPage() {
+                               setSelectedParty(p);
+                               setShowPaymentModal(true);
+                             }}
+-                            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 px-3 py-1 rounded-lg text-xs font-semibold border border-emerald-200 transition flex items-center gap-1 mx-auto"
++                            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 min-h-11 px-3 py-1 rounded-lg text-xs font-semibold border border-emerald-200 transition flex items-center gap-1 mx-auto"
+                           >
+                             <DollarSign className="w-3.5 h-3.5" />
+                             <span>Receive Pay</span>
+@@ -223,7 +223,7 @@ export default function PartiesPage() {
+       {/* Tab 2: Commissions Table */}
+       {activeTab === 'commissions' && (
+         <div className="bg-white rounded-2xl shadow-sm border border-[#E7E2D9] overflow-hidden">
+-          <div className="overflow-x-auto">
++          <div role="region" aria-label="Parties and commissions table; scroll for more columns" tabIndex={0} className="table-scroll">
+             <table className="w-full text-left text-sm">
+               <thead className="text-xs uppercase font-semibold text-gray-600 bg-gray-50 border-b border-gray-200">
+                 <tr>
+@@ -262,11 +262,11 @@ export default function PartiesPage() {
+                           {c.transaction?.documentNumber}
+                         </td>
+                         <td className="py-3.5 px-4 text-xs text-gray-600">{formatDate(c.createdAt)}</td>
+-                        <td className="py-3.5 px-4 text-right font-mono text-gray-700">
++                        <td className="py-3.5 px-4 text-right font-mono tabular-nums text-gray-700">
+                           {formatINR(c.eligibleAmount)}
+                         </td>
+                         <td className="py-3.5 px-4 text-center font-mono text-xs">{c.commissionPercent}%</td>
+-                        <td className="py-3.5 px-4 text-right font-mono font-bold text-base text-gray-900">
++                        <td className="py-3.5 px-4 text-right font-mono tabular-nums font-bold text-base text-gray-900">
+                           {formatINR(c.commissionAmount)}
+                         </td>
+                         <td className="py-3.5 px-4 text-center">
+@@ -284,7 +284,7 @@ export default function PartiesPage() {
+                           {isPending ? (
+                             <button
+                               onClick={() => handlePayCommission(c.id, c.referrer?.name, Number(c.commissionAmount))}
+-                              className="bg-emerald-700 hover:bg-emerald-800 text-white px-3 py-1 rounded-lg text-xs font-bold transition shadow-sm"
++                              className="bg-emerald-700 hover:bg-emerald-800 text-white min-h-11 px-3 py-1 rounded-lg text-xs font-bold transition shadow-sm"
+                             >
+                               Mark Paid
+                             </button>
+@@ -311,7 +311,7 @@ export default function PartiesPage() {
+                 <DollarSign className="w-5 h-5 text-emerald-700" />
+                 <span>Receive Payment Receipt</span>
+               </h3>
+-              <button onClick={() => setShowPaymentModal(false)} className="text-gray-400 hover:text-gray-700 font-bold">✕</button>
++              <button onClick={() => setShowPaymentModal(false)} aria-label="Close receipt entry" title="Close receipt entry" className="icon-action text-gray-700">✕</button>
+             </div>
+ 
+             <div className="bg-gray-50 p-3 rounded-xl text-xs space-y-1">
+diff --git a/apps/web/components/Navigation.tsx b/apps/web/components/Navigation.tsx
+index 9086c84..be7177a 100644
+--- a/apps/web/components/Navigation.tsx
++++ b/apps/web/components/Navigation.tsx
+@@ -17,7 +17,7 @@ export default function Navigation() {
+ 
+   return (
+     <header className="bg-[#0F1A15] text-[#E6EFEA] border-b border-[#1f3128] sticky top-0 z-40">
+-      <div className="max-w-[1500px] mx-auto px-4 flex items-center justify-between h-16">
++      <div className="max-w-[1500px] mx-auto px-4 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 py-2 xl:flex xl:justify-between">
+         {/* Brand */}
+         <div className="flex items-center gap-3">
+           <div className="w-10 h-10 rounded-xl bg-[#0B7A55] flex items-center justify-center font-bold text-white text-xl shadow-md">
+@@ -25,14 +25,14 @@ export default function Navigation() {
+           </div>
+           <div>
+             <span className="font-bold tracking-tight text-lg text-white font-['Space_Grotesk']">LAMMART</span>
+-            <span className="ml-2 text-xs font-medium px-2 py-0.5 rounded-full bg-[#1b2f25] text-[#66c3a2] border border-[#2b4d3d]">
++            <span className="ml-2 hidden text-xs sm:inline font-medium px-2 py-0.5 rounded-full bg-[#1b2f25] text-[#66c3a2] border border-[#2b4d3d]">
+               Retail POS & Challan
+             </span>
+           </div>
+         </div>
+ 
+         {/* Navigation Tabs */}
+-        <nav className="flex items-center gap-1">
++        <nav aria-label="POS navigation" className="order-last col-span-2 flex min-w-0 items-center gap-1 overflow-x-auto p-1 xl:order-none">
+           {links.map((link) => {
+             const Icon = link.icon;
+             const active = pathname === link.href;
+@@ -40,7 +40,8 @@ export default function Navigation() {
+               <Link
+                 key={link.href}
+                 href={link.href}
+-                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${
++                aria-current={active ? "page" : undefined}
++                className={`flex min-h-11 shrink-0 items-center gap-2 px-3 rounded-lg text-sm font-medium transition-all ${
+                   active
+                     ? 'bg-[#0B7A55] text-white shadow-sm font-semibold'
+                     : 'text-[#a3b8af] hover:text-white hover:bg-[#192b22]'
+@@ -55,14 +56,14 @@ export default function Navigation() {
+ 
+         {/* Role & Showroom Indicator */}
+         <div className="flex items-center gap-3">
+-          <div className="text-right">
++          <div className="hidden text-right xl:block">
+             <div className="text-xs text-[#8aa396]">Active Location</div>
+             <div className="text-sm font-semibold text-white flex items-center gap-1.5">
+               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+               Showroom + Godown
+             </div>
+           </div>
+-          <div className="h-8 w-[1px] bg-[#233a2f]"></div>
++          <div className="hidden xl:block h-8 w-px bg-[#233a2f]"></div>
+           <div className="flex items-center gap-2 bg-[#17271f] px-3 py-1.5 rounded-lg border border-[#274235]">
+             <ShieldCheck className="w-4 h-4 text-[#33af83]" />
+             <span className="text-xs font-semibold text-emerald-200">Admin/Owner</span>
+diff --git a/apps/web/components/PrintModal.tsx b/apps/web/components/PrintModal.tsx
+index f1130ae..5404fb0 100644
+--- a/apps/web/components/PrintModal.tsx
++++ b/apps/web/components/PrintModal.tsx
+@@ -1,6 +1,8 @@
+ 'use client';
+ 
+-import { Printer, X, CheckCircle2 } from 'lucide-react';
++import { useEffect, useRef, useState } from 'react';
++import { createPortal } from 'react-dom';
++import { X } from 'lucide-react';
+ import { formatINR, formatDate } from '@/lib/formatters';
+ 
+ interface PrintModalProps {
+@@ -9,46 +11,30 @@ interface PrintModalProps {
+ }
+ 
+ export default function PrintModal({ transaction, onClose }: PrintModalProps) {
+-  if (!transaction) return null;
++  const dialog = useRef<HTMLDialogElement>(null);
++  const [layout, setLayout] = useState<'a4' | 'thermal'>('a4');
++  const isOpen = Boolean(transaction);
+ 
++  useEffect(() => {
++    const element = dialog.current;
++    const previous = window.document.activeElement;
++    if (isOpen && element && !element.open) element.showModal();
++    return () => {
++      if (element?.open) element.close();
++      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
++    };
++  }, [isOpen]);
++
++  if (!transaction || typeof window === 'undefined') return null;
+   const isChallan = transaction.transactionType === 'Delivery_Challan';
+   const isEstimate = transaction.transactionType === 'Estimate';
+-  const docTitle = isChallan
+-    ? 'DELIVERY CHALLAN'
+-    : isEstimate
+-    ? 'ESTIMATE / QUOTATION'
+-    : 'TAX INVOICE';
+-
+-  return (
+-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+-      <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-gray-200">
+-        {/* Modal Top Bar */}
+-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50 rounded-t-2xl no-print">
+-          <div className="flex items-center gap-2">
+-            <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+-            <span className="font-semibold text-gray-800">
+-              {docTitle} Created: <span className="font-mono text-emerald-700">{transaction.documentNumber}</span>
+-            </span>
+-          </div>
+-          <div className="flex items-center gap-3">
+-            <button
+-              onClick={() => window.print()}
+-              className="flex items-center gap-2 bg-[#0B7A55] hover:bg-[#086143] text-white px-4 py-2 rounded-xl text-sm font-medium shadow transition-all"
+-            >
+-              <Printer className="w-4 h-4" />
+-              <span>Print Document</span>
+-            </button>
+-            <button
+-              onClick={onClose}
+-              className="p-2 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-200 transition"
+-            >
+-              <X className="w-5 h-5" />
+-            </button>
+-          </div>
+-        </div>
++  const docTitle = isChallan ? 'DELIVERY CHALLAN' : isEstimate ? 'ESTIMATE / QUOTATION' : 'TAX INVOICE';
+ 
+-        {/* Printable Document Area */}
+-        <div className="p-8 overflow-y-auto text-gray-900 font-sans print:p-0">
++  const pageCss = layout === 'a4'
++    ? '@page { size: A4; margin: 12mm; }'
++    : '@page { size: auto; margin: 3mm; }';
++  const a4 = (
++    <article className="print-document p-6 text-gray-900">
+           {/* Header */}
+           <div className="border-b-2 border-gray-900 pb-4 mb-6">
+             <div className="flex justify-between items-start">
+@@ -108,7 +94,7 @@ export default function PrintModal({ transaction, onClose }: PrintModalProps) {
+           </div>
+ 
+           {/* Line Items Table */}
+-          <table className="w-full text-left text-sm border-collapse mb-6">
++          <table className="print-table w-full text-left text-sm border-collapse mb-6">
+             <thead>
+               <tr className="border-b-2 border-gray-800 bg-gray-100 text-gray-800 text-xs uppercase font-bold">
+                 <th className="py-2 px-3">#</th>
+@@ -133,7 +119,7 @@ export default function PrintModal({ transaction, onClose }: PrintModalProps) {
+                   <tr key={li.id || idx} className="hover:bg-gray-50">
+                     <td className="py-2.5 px-3 text-gray-500">{idx + 1}</td>
+                     <td className="py-2.5 px-3 font-medium text-gray-900">{desc}</td>
+-                    <td className="py-2.5 px-3 text-center font-mono text-xs text-gray-600">{li.variant?.hsnCode || '4823'}</td>
++                    <td className="py-2.5 px-3 text-center font-mono text-xs text-gray-600">{li.variant?.hsnCode || '—'}</td>
+                     <td className="py-2.5 px-3 text-right font-bold text-gray-900">{li.quantity} {li.variant?.unit || 'Sheets'}</td>
+                     <td className="py-2.5 px-3 text-right font-mono">{formatINR(li.rate)}</td>
+                     <td className="py-2.5 px-3 text-right font-mono text-gray-600">{li.discountPercent ? `${li.discountPercent}%` : '-'}</td>
+@@ -147,7 +133,7 @@ export default function PrintModal({ transaction, onClose }: PrintModalProps) {
+           </table>
+ 
+           {/* Summary / Tax Split */}
+-          <div className="flex justify-between items-start border-t-2 border-gray-800 pt-4">
++          <div className="print-keep flex justify-between items-start border-t-2 border-gray-800 pt-4">
+             <div className="max-w-md text-xs text-gray-500 space-y-1">
+               <p className="font-bold text-gray-700">Terms & Conditions:</p>
+               <p>1. Goods once sold will not be taken back without original challan.</p>
+@@ -161,19 +147,19 @@ export default function PrintModal({ transaction, onClose }: PrintModalProps) {
+               </div>
+               {!isChallan && Number(transaction.totalCgst) > 0 && (
+                 <div className="flex justify-between text-gray-600 text-xs">
+-                  <span>CGST (9%):</span>
++                  <span>CGST:</span>
+                   <span className="font-mono">{formatINR(transaction.totalCgst)}</span>
+                 </div>
+               )}
+               {!isChallan && Number(transaction.totalSgst) > 0 && (
+                 <div className="flex justify-between text-gray-600 text-xs">
+-                  <span>SGST (9%):</span>
++                  <span>SGST:</span>
+                   <span className="font-mono">{formatINR(transaction.totalSgst)}</span>
+                 </div>
+               )}
+               {!isChallan && Number(transaction.totalIgst) > 0 && (
+                 <div className="flex justify-between text-gray-600 text-xs">
+-                  <span>IGST (18%):</span>
++                  <span>IGST:</span>
+                   <span className="font-mono">{formatINR(transaction.totalIgst)}</span>
+                 </div>
+               )}
+@@ -185,18 +171,65 @@ export default function PrintModal({ transaction, onClose }: PrintModalProps) {
+           </div>
+ 
+           {/* Signatures */}
+-          <div className="flex justify-between items-end mt-16 pt-8 border-t border-dashed border-gray-300 text-xs text-gray-600">
++          <div className="print-keep flex justify-between items-end mt-16 pt-8 border-t border-dashed border-gray-300 text-xs text-gray-600">
+             <div>
+               <div className="border-t border-gray-400 w-48 mb-1"></div>
+-              <span>Receiver's Signature</span>
++              <span>Receiver&apos;s Signature</span>
+             </div>
+             <div className="text-right">
+               <div className="border-t border-gray-400 w-48 mb-1 ml-auto"></div>
+               <span>For LAMMART LAMINATES (Authorized Signatory)</span>
+             </div>
+           </div>
+-        </div>
++    </article>
++  );
++  const receipt = (
++    <article className="print-document thermal-document mx-auto space-y-2 p-2 font-mono text-xs tabular-nums">
++      <h2 className="text-sm font-bold">LAMMART</h2>
++      <p>{docTitle} • {transaction.documentNumber}</p>
++      <p>{formatDate(transaction.date)} • {transaction.customer?.name}</p>
++      <ol className="space-y-2 border-y border-current py-2">
++        {transaction.lineItems?.map((li: any, index: number) => (
++          <li key={li.id ?? index} className="print-keep">
++            <p className="break-words font-semibold">{li.variant?.brand} {li.variant?.designCode} {li.variant?.designName}</p>
++            <p>HSN: {li.variant?.hsnCode || '—'}</p>
++            <p className="flex justify-between gap-2"><span>{li.quantity} × {formatINR(li.rate)}</span><strong>{formatINR(li.total)}</strong></p>
++            {Number(li.discountPercent) > 0 && <p>Discount: {li.discountPercent}%</p>}
++          </li>
++        ))}
++      </ol>
++      <div className="print-keep">
++        {!isChallan && <>
++          <p>Taxable: {formatINR(transaction.subtotal)}</p>
++          {Number(transaction.totalCgst) > 0 && <p>CGST: {formatINR(transaction.totalCgst)}</p>}
++          {Number(transaction.totalSgst) > 0 && <p>SGST: {formatINR(transaction.totalSgst)}</p>}
++          {Number(transaction.totalIgst) > 0 && <p>IGST: {formatINR(transaction.totalIgst)}</p>}
++        </>}
++        <p className="border-t border-current pt-1 font-bold">Total: {formatINR(transaction.grandTotal)}</p>
++        {transaction.transactionType === 'Tax_Invoice' && <p>Receipt copy • Full tax invoice available</p>}
+       </div>
+-    </div>
++    </article>
++  );
++
++  return createPortal(
++    <>
++      <dialog ref={dialog} aria-labelledby="print-preview-title"
++        onCancel={(event) => { event.preventDefault(); onClose(); }}
++        className="no-print max-h-[90dvh] w-[calc(100%_-_2rem)] max-w-4xl overflow-y-auto rounded-2xl bg-white p-0 backdrop:bg-black/60">
++        <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border bg-white p-3">
++          <h2 id="print-preview-title" className="mr-auto font-heading font-bold">{docTitle} preview</h2>
++          <label className="text-sm">Paper format{' '}
++            <select className="min-h-11 rounded-lg border border-chip px-2" value={layout} onChange={(event) => setLayout(event.target.value === 'thermal' ? 'thermal' : 'a4')}>
++              <option value="a4">A4 document</option>
++              <option value="thermal">80 mm receipt copy</option>
++            </select>
++          </label>
++          <button type="button" onClick={() => window.print()} className="min-h-11 rounded-xl bg-primary px-4 text-sm font-semibold text-white hover:bg-primary-hover">Print document</button>
++          <button type="button" onClick={onClose} aria-label="Close print preview" title="Close print preview" className="icon-action"><X aria-hidden="true" className="h-5 w-5" /></button>
++        </div>
++        <div className="overflow-x-auto">{layout === 'a4' ? a4 : receipt}</div>
++      </dialog>
++      <div className="print-copy" aria-hidden="true"><style>{pageCss}</style>{layout === 'a4' ? a4 : receipt}</div>
++    </>, window.document.body,
+   );
+ }
